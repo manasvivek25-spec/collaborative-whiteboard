@@ -44,6 +44,7 @@ export default function Toolbar({
   setStrokeWidth,
   gridMode = 'square',
   setGridMode,
+  onCycleGrid,
   onUndo,
   onRedo,
   onClearCanvas,
@@ -243,38 +244,16 @@ export default function Toolbar({
         </button>
       </div>
 
-      {/* Grid Style Switcher */}
-      <div className="relative pr-1.5 border-r border-slate-200">
+      {/* Grid Style Cycler (1-Click Cycle: None -> Square -> Dot -> Ruled) */}
+      <div className="pr-1.5 border-r border-slate-200">
         <button
-          onClick={() => setShowGridMenu(!showGridMenu)}
-          title={`Canvas Grid Style: ${gridMode}`}
-          className={`p-2 rounded-xl flex items-center gap-1 transition ${gridMode !== 'none' ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+          onClick={onCycleGrid}
+          title={`Canvas Grid: ${gridMode.toUpperCase()} (Click to cycle None / Square / Dot / Ruled)`}
+          className="px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
         >
-          <Grid3X3 className="w-4 h-4" />
+          <Grid3X3 className="w-4 h-4 text-blue-600" />
+          <span className="capitalize">{gridMode}</span>
         </button>
-
-        {showGridMenu && (
-          <div className="absolute top-12 left-0 p-1.5 bg-white rounded-xl shadow-xl border border-slate-200 flex flex-col gap-1 z-50 animate-fade-in w-44">
-            <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              Canvas Grid Style
-            </div>
-            {gridOptions.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => {
-                  setGridMode(opt.id);
-                  setShowGridMenu(false);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition ${
-                  gridMode === opt.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                <span>{opt.label}</span>
-                {gridMode === opt.id && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Colors & Stroke Width */}

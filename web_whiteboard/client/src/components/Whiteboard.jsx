@@ -301,8 +301,8 @@ export default function Whiteboard({
       }
       ctx.stroke();
     } else if (gridMode === 'dot') {
-      ctx.fillStyle = '#94a3b8';
-      const dotRadius = Math.max(1, 1.2 * Math.min(zoom, 1.5));
+      ctx.fillStyle = '#64748b';
+      const dotRadius = Math.max(1.8, 2.2 * Math.min(zoom, 1.5));
       for (let x = offsetX; x <= w; x += gridSize) {
         for (let y = offsetY; y <= h; y += gridSize) {
           ctx.beginPath();
@@ -311,8 +311,8 @@ export default function Whiteboard({
         }
       }
     } else if (gridMode === 'ruled') {
-      ctx.strokeStyle = '#cbd5e1';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 1.2;
       ctx.beginPath();
       for (let y = offsetY; y <= h; y += gridSize) {
         ctx.moveTo(0, Math.round(y) + 0.5);
@@ -533,32 +533,40 @@ export default function Whiteboard({
           }
         }
 
-        // Selected Table bounding box and handles
+        // Small Drag Button and Delete Button ABOVE Table
+        ctx.save();
+        // Drag Pill
+        ctx.fillStyle = '#2563eb';
+        ctx.beginPath();
+        ctx.roundRect(act.x0, act.y0 - 26, 96, 20, [5]);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText('✥ Drag Table', act.x0 + 8, act.y0 - 12);
+
+        // Delete Button Pill
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.roundRect(act.x0 + 102, act.y0 - 26, 20, 20, [5]);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px Inter, sans-serif';
+        ctx.fillText('✕', act.x0 + 107, act.y0 - 12);
+
+        // Bottom-Right Resize Handle
+        ctx.fillStyle = '#2563eb';
+        ctx.fillRect(act.x1 - 6, act.y1 - 6, 12, 12);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(act.x1 - 6, act.y1 - 6, 12, 12);
+
         if (selectedTableId === act.id) {
-          ctx.save();
           ctx.strokeStyle = '#2563eb';
           ctx.lineWidth = 2;
           ctx.setLineDash([4, 4]);
           ctx.strokeRect(act.x0 - 2, act.y0 - 2, w + 4, h + 4);
-
-          // Top Move Drag Bar
-          ctx.setLineDash([]);
-          ctx.fillStyle = '#2563eb';
-          ctx.beginPath();
-          ctx.roundRect(act.x0, act.y0 - 24, Math.min(180, w), 20, [6]);
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.font = 'bold 11px Inter, sans-serif';
-          ctx.fillText(`⠿ Drag Table (${rows}x${cols})`, act.x0 + 8, act.y0 - 10);
-
-          // Bottom-Right Resize Handle
-          ctx.fillStyle = '#2563eb';
-          ctx.fillRect(act.x1 - 6, act.y1 - 6, 12, 12);
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 2;
-          ctx.strokeRect(act.x1 - 6, act.y1 - 6, 12, 12);
-          ctx.restore();
         }
+        ctx.restore();
         break;
       }
     }
@@ -593,10 +601,39 @@ export default function Whiteboard({
 
     const { x, y } = getCanvasCoords(e);
 
-    // Check interaction with Tables (Resize or Drag or Cell Click)
+    // Check interaction with Tables (Drag button, Delete button, Resize handle, or Cell Click)
     const tables = actions.filter(a => a.kind === 'table' && !a.undone);
     for (let i = tables.length - 1; i >= 0; i--) {
       const tbl = tables[i];
+
+      // 1. Delete button above table [tbl.x0 + 102, tbl.y0 - 26, 20, 20]
+      if (x >= tbl.x0 + 102 && x <= tbl.x0 + 122 && y >= tbl.y0 - 26 && y <= tbl.y0 - 6) {
+        if (myPermissions.can_draw) {
+          commitAction({ ...tbl, undone: true });
+          setSelectedTableId(null);
+          showNotification('Table removed');
+        }
+        return;
+      }
+
+      // 2. Drag button above table [tbl.x0, tbl.y0 - 26, 96, 20]
+      if (x >= tbl.x0 && x <= tbl.x0 + 96 && y >= tbl.y0 - 26 && y <= tbl.y0 - 6) {
+        if (myPermissions.can_draw) {
+          setSelectedTableId(tbl.id);
+          setTableDrag({
+            id: tbl.id,
+            startX: x,
+            startY: y,
+            origX0: tbl.x0,
+            origY0: tbl.y0,
+            origX1: tbl.x1,
+            origY1: tbl.y1
+          });
+        }
+        return;
+      }
+
+      // 3. Resize handle at bottom-right (x1, y1)
       const nearResize = Math.hypot(x - tbl.x1, y - tbl.y1) < 18 / zoom;
       if (nearResize && myPermissions.can_draw) {
         setSelectedTableId(tbl.id);
@@ -612,48 +649,33 @@ export default function Whiteboard({
         return;
       }
 
+      // 4. Click inside Table cells (ONLY edits cells, NEVER starts drag)
       const insideTable = x >= tbl.x0 && x <= tbl.x1 && y >= tbl.y0 && y <= tbl.y1;
-      const insideMoveBar = x >= tbl.x0 && x <= tbl.x0 + 180 && y >= tbl.y0 - 26 && y <= tbl.y0;
-
-      if (insideTable || insideMoveBar) {
+      if (insideTable) {
         setSelectedTableId(tbl.id);
 
-        if (insideTable) {
+        if (myPermissions.can_draw) {
           const cellW = (tbl.x1 - tbl.x0) / (tbl.cols || 3);
           const cellH = (tbl.y1 - tbl.y0) / (tbl.rows || 3);
           const r = Math.floor((y - tbl.y0) / cellH);
           const c = Math.floor((x - tbl.x0) / cellW);
 
-          // If clicked in cell and already selected or on second click -> edit cell text
-          if (selectedTableId === tbl.id && myPermissions.can_draw) {
-            const currentVal = tbl.cells?.[`${r},${c}`] || '';
-            const newVal = prompt(`Edit Table Cell (${r + 1}, ${c + 1}):`, currentVal);
-            if (newVal !== null) {
-              const updatedTable = {
-                ...tbl,
-                cells: {
-                  ...(tbl.cells || {}),
-                  [`${r},${c}`]: newVal
-                }
-              };
-              commitAction(updatedTable);
-              return;
-            }
+          const currentVal = tbl.cells?.[`${r},${c}`] || '';
+          const newVal = prompt(`Edit Table Cell (Row ${r + 1}, Col ${c + 1}):`, currentVal);
+          if (newVal !== null && newVal !== currentVal) {
+            const updatedTable = {
+              ...tbl,
+              cells: {
+                ...(tbl.cells || {}),
+                [`${r},${c}`]: newVal
+              }
+            };
+            commitAction(updatedTable);
           }
         }
-
-        // Drag table
-        if (myPermissions.can_draw) {
-          setTableDrag({
-            id: tbl.id,
-            startX: x,
-            startY: y,
-            origX0: tbl.x0,
-            origY0: tbl.y0,
-            origX1: tbl.x1,
-            origY1: tbl.y1
-          });
-        }
+        // NEVER set tableDrag here! Table will not stick to cursor
+        setTableDrag(null);
+        setIsDrawing(false);
         return;
       }
     }
@@ -887,20 +909,38 @@ export default function Whiteboard({
     }
   };
 
-  // ── WHEEL SCROLL FOR INFINITE ZOOM & PAN ───────────────────────────
-  const handleWheel = (e) => {
-    e.preventDefault();
-    if (e.ctrlKey || e.metaKey) {
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.max(0.2, Math.min(3.0, zoom * zoomFactor));
+  // ── MOUSE WHEEL: POINTER-CENTERED ZOOM IN & OUT ────────────────────
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onCanvasWheel = (e) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      // Mouse wheel directly zooms centered on pointer position
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      const newZoom = Math.max(0.15, Math.min(4.0, zoom * zoomFactor));
+
+      if (Math.abs(newZoom - zoom) < 0.001) return;
+
+      const worldX = (mouseX - panOffset.x) / zoom;
+      const worldY = (mouseY - panOffset.y) / zoom;
+
+      const newPanX = mouseX - worldX * newZoom;
+      const newPanY = mouseY - worldY * newZoom;
+
       setZoom(newZoom);
-    } else {
-      setPanOffset(prev => ({
-        x: prev.x - e.deltaX,
-        y: prev.y - e.deltaY
-      }));
-    }
-  };
+      setPanOffset({ x: newPanX, y: newPanY });
+    };
+
+    canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener('wheel', onCanvasWheel);
+    };
+  }, [zoom, panOffset]);
 
   // ── ACTION DISPATCHER & COMMIT ──────────────────────────────────────
   const commitAction = (action) => {
@@ -1094,6 +1134,20 @@ export default function Whiteboard({
     showNotification('🎯 Canvas view reset to center');
   };
 
+  const handleCycleGrid = () => {
+    const modes = ['square', 'dot', 'ruled', 'none'];
+    const labels = {
+      square: '🔲 Square Graph Grid',
+      dot: '⚪ Dot Matrix Grid',
+      ruled: '📜 Ruled Notebook Lines',
+      none: '⬜ Plain (No Grid)'
+    };
+    const nextIdx = (modes.indexOf(gridMode) + 1) % modes.length;
+    const nextMode = modes[nextIdx];
+    setGridMode(nextMode);
+    showNotification(`Canvas Grid: ${labels[nextMode]}`);
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none bg-slate-100 font-sans">
       {/* Top Left Navigation Header */}
@@ -1147,6 +1201,7 @@ export default function Whiteboard({
         setStrokeWidth={setStrokeWidth}
         gridMode={gridMode}
         setGridMode={setGridMode}
+        onCycleGrid={handleCycleGrid}
         onUndo={handleUndo}
         onRedo={handleRedo}
         onClearCanvas={handleClearCanvas}
@@ -1221,8 +1276,7 @@ export default function Whiteboard({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onWheel={handleWheel}
-        className={`whiteboard-canvas absolute inset-0 z-1 touch-none ${
+        className={`whiteboard-canvas absolute inset-0 z-[1] touch-none bg-transparent ${
           activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' :
           !myPermissions.can_draw ? 'cursor-not-allowed' : 'cursor-crosshair'
         }`}

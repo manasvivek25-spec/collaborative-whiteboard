@@ -91,3 +91,4 @@ export default function TableModal({ isOpen, onClose, onCreateTable }) {
     </div>
   );
 }
+
