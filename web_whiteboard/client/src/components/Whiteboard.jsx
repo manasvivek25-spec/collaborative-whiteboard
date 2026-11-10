@@ -5,6 +5,8 @@ import ChatDrawer from './ChatDrawer';
 import InstancesModal from './InstancesModal';
 import AddMemberModal from './AddMemberModal';
 import TableModal from './TableModal';
+import ShapesModal, { SHAPES_LIST } from './ShapesModal';
+import ExportModal from './ExportModal';
 import { recognizeInkStrokes } from '../utils/inkToFont';
 import {
   Users,
@@ -18,7 +20,8 @@ import {
   Check,
   Download,
   Hand,
-  RotateCcw
+  RotateCcw,
+  Camera
 } from 'lucide-react';
 
 export default function Whiteboard({
@@ -41,11 +44,23 @@ export default function Whiteboard({
   const [gridMode, setGridMode] = useState('square'); // 'none' | 'square' | 'dot' | 'ruled'
 
   // Canvas Action Records
-  const [actions, setActions] = useState([]);
+  const [actions, setActions] = useState(() => {
+    if (isOffline) {
+      try {
+        const saved = localStorage.getItem(`offline_actions_${room.code}`);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+      return room.actions || [];
+    }
+    return [];
+  });
   const [redoStack, setRedoStack] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState(null);
   const [shapeStart, setShapeStart] = useState(null);
+  const [currentPreviewPoint, setCurrentPreviewPoint] = useState(null);
   const [streamingStrokes, setStreamingStrokes] = useState(new Map());
 
   // Infinite Pan Interaction State
@@ -63,18 +78,51 @@ export default function Whiteboard({
   const [members, setMembers] = useState([]);
   const [remoteCursors, setRemoteCursors] = useState(new Map());
   const [chatMessages, setChatMessages] = useState([]);
-  const [milestones, setMilestones] = useState([]);
+  const [milestones, setMilestones] = useState(() => {
+    if (isOffline) {
+      try {
+        const saved = localStorage.getItem(`offline_milestones_${room.code}`);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [];
+  });
   const [connectedUsers, setConnectedUsers] = useState([]);
-  const [myPermissions, setMyPermissions] = useState({ can_draw: true, role: 'member' });
+  const [myPermissions, setMyPermissions] = useState({ can_draw: true, role: 'member', can_save_instance: true });
 
   // Drawers & Modals
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isMilestonesOpen, setIsMilestonesOpen] = useState(false);
   const [isAddMemberOpen, setIsAddMemberOpen] = useState(false);
+  const [isShapesModalOpen, setIsShapesModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [statusText, setStatusText] = useState('Connected to session');
+  const [statusText, setStatusText] = useState(isOffline ? 'Offline Personal Workspace' : 'Connected to session');
   const [roomNotification, setRoomNotification] = useState(null);
+
+  // Persist offline actions & milestones
+  useEffect(() => {
+    if (isOffline && room?.code) {
+      try {
+        localStorage.setItem(`offline_actions_${room.code}`, JSON.stringify(actions));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [actions, isOffline, room?.code]);
+
+  useEffect(() => {
+    if (isOffline && room?.code) {
+      try {
+        localStorage.setItem(`offline_milestones_${room.code}`, JSON.stringify(milestones));
+      } catch (e) {
+        console.error(e);
+      }
+    }
+  }, [milestones, isOffline, room?.code]);
 
   const isHost = roomData?.host_user_code === user?.user_code || isOffline;
   const isCohost = myPermissions.role === 'cohost';
@@ -245,6 +293,21 @@ export default function Whiteboard({
         setConnectedUsers(msg.users || []);
         break;
 
+      case 'received_session_bundle': {
+        showNotification(`📦 ${msg.sender_name} shared a whiteboard bundle with you!`);
+        if (window.confirm(`${msg.sender_name} shared a complete whiteboard session bundle ("${msg.bundle?.title || 'Shared Board'}"). Would you like to download this file?`)) {
+          const blob = new Blob([JSON.stringify(msg.bundle, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.download = `${(msg.bundle?.title || 'shared_board').replace(/[^a-zA-Z0-9]/g, '_')}_shared.whiteboard`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }
+        break;
+      }
+
       case 'notice':
         setStatusText(msg.text);
         showNotification(msg.text);
@@ -367,8 +430,32 @@ export default function Whiteboard({
       );
     }
 
+    // Render live vector shape preview while dragging
+    if (activeTool === 'shape' && shapeStart && currentPreviewPoint) {
+      const sx = shapeStart.x;
+      const sy = shapeStart.y;
+      const ex = currentPreviewPoint.x;
+      const ey = currentPreviewPoint.y;
+      const previewAct = {
+        id: 'preview_shape',
+        kind: activeShape,
+        color: strokeColor,
+        width: strokeWidth,
+        opacity: 0.75,
+        x: Math.min(sx, ex),
+        y: Math.min(sy, ey),
+        w: Math.abs(ex - sx),
+        h: Math.abs(ey - sy),
+        x1: sx,
+        y1: sy,
+        x2: ex,
+        y2: ey
+      };
+      renderAction(ctx, previewAct);
+    }
+
     ctx.restore();
-  }, [actions, streamingStrokes, currentStroke, zoom, panOffset, drawInfiniteGrid, selectedTableId]);
+  }, [actions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, zoom, panOffset, drawInfiniteGrid, selectedTableId]);
 
   useEffect(() => {
     redrawCanvas();
@@ -421,6 +508,19 @@ export default function Whiteboard({
         ctx.stroke();
         break;
 
+      case 'rounded_rect': {
+        const radius = Math.min(16, act.w / 4, act.h / 4);
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(act.x, act.y, act.w, act.h, [radius]);
+        } else {
+          ctx.rect(act.x, act.y, act.w, act.h);
+        }
+        if (act.fill && act.fill !== 'transparent') ctx.fill();
+        ctx.stroke();
+        break;
+      }
+
       case 'circle': {
         const rx = Math.abs(act.w / 2);
         const ry = Math.abs(act.h / 2);
@@ -428,6 +528,49 @@ export default function Whiteboard({
         const cy = act.y + act.h / 2;
         ctx.beginPath();
         ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        if (act.fill && act.fill !== 'transparent') ctx.fill();
+        ctx.stroke();
+        break;
+      }
+
+      case 'triangle': {
+        ctx.beginPath();
+        ctx.moveTo(act.x + act.w / 2, act.y);
+        ctx.lineTo(act.x + act.w, act.y + act.h);
+        ctx.lineTo(act.x, act.y + act.h);
+        ctx.closePath();
+        if (act.fill && act.fill !== 'transparent') ctx.fill();
+        ctx.stroke();
+        break;
+      }
+
+      case 'diamond': {
+        ctx.beginPath();
+        ctx.moveTo(act.x + act.w / 2, act.y);
+        ctx.lineTo(act.x + act.w, act.y + act.h / 2);
+        ctx.lineTo(act.x + act.w / 2, act.y + act.h);
+        ctx.lineTo(act.x, act.y + act.h / 2);
+        ctx.closePath();
+        if (act.fill && act.fill !== 'transparent') ctx.fill();
+        ctx.stroke();
+        break;
+      }
+
+      case 'star': {
+        const cx = act.x + act.w / 2;
+        const cy = act.y + act.h / 2;
+        const outerR = Math.min(Math.abs(act.w), Math.abs(act.h)) / 2;
+        const innerR = outerR * 0.42;
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? outerR : innerR;
+          const angle = (i * Math.PI) / 5 - Math.PI / 2;
+          const px = cx + r * Math.cos(angle);
+          const py = cy + r * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
         if (act.fill && act.fill !== 'transparent') ctx.fill();
         ctx.stroke();
         break;
@@ -816,6 +959,10 @@ export default function Whiteboard({
 
     if (!isDrawing) return;
 
+    if (activeTool === 'shape' && shapeStart) {
+      setCurrentPreviewPoint({ x, y });
+    }
+
     if (currentStroke) {
       const updatedPts = [...currentStroke.points, [x, y]];
       setCurrentStroke(prev => ({ ...prev, points: updatedPts }));
@@ -862,50 +1009,44 @@ export default function Whiteboard({
       setCurrentStroke(null);
     } else if (activeTool === 'shape' && shapeStart) {
       const { x, y } = getCanvasCoords(e);
-      const w = x - shapeStart.x;
-      const h = y - shapeStart.y;
-      const shapeId = `shape_${Date.now()}`;
+      const w = Math.abs(x - shapeStart.x);
+      const h = Math.abs(y - shapeStart.y);
+      const shapeId = `shape_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
       let shapeAction = null;
-      if (activeShape === 'rect') {
-        shapeAction = {
-          id: shapeId,
-          kind: 'rect',
-          x: Math.min(shapeStart.x, x),
-          y: Math.min(shapeStart.y, y),
-          w: Math.abs(w),
-          h: Math.abs(h),
-          color: strokeColor,
-          width: strokeWidth
-        };
-      } else if (activeShape === 'circle') {
-        shapeAction = {
-          id: shapeId,
-          kind: 'circle',
-          x: Math.min(shapeStart.x, x),
-          y: Math.min(shapeStart.y, y),
-          w: Math.abs(w),
-          h: Math.abs(h),
-          color: strokeColor,
-          width: strokeWidth
-        };
+      if (['rect', 'rounded_rect', 'circle', 'triangle', 'diamond', 'star'].includes(activeShape)) {
+        if (w > 3 || h > 3) {
+          shapeAction = {
+            id: shapeId,
+            kind: activeShape,
+            x: Math.min(shapeStart.x, x),
+            y: Math.min(shapeStart.y, y),
+            w,
+            h,
+            color: strokeColor,
+            width: strokeWidth
+          };
+        }
       } else if (activeShape === 'line' || activeShape === 'arrow') {
-        shapeAction = {
-          id: shapeId,
-          kind: activeShape,
-          x1: shapeStart.x,
-          y1: shapeStart.y,
-          x2: x,
-          y2: y,
-          color: strokeColor,
-          width: strokeWidth
-        };
+        if (Math.hypot(x - shapeStart.x, y - shapeStart.y) > 3) {
+          shapeAction = {
+            id: shapeId,
+            kind: activeShape,
+            x1: shapeStart.x,
+            y1: shapeStart.y,
+            x2: x,
+            y2: y,
+            color: strokeColor,
+            width: strokeWidth
+          };
+        }
       }
 
       if (shapeAction) {
         commitAction(shapeAction);
       }
       setShapeStart(null);
+      setCurrentPreviewPoint(null);
     }
   };
 
@@ -1148,48 +1289,216 @@ export default function Whiteboard({
     showNotification(`Canvas Grid: ${labels[nextMode]}`);
   };
 
+  // ── SCREENSHOT / EXPORT / SHARE ────────────────────────────────────
+  const handleTakeScreenshot = () => {
+    try {
+      const bgCanvas = bgCanvasRef.current;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const offscreen = document.createElement('canvas');
+      offscreen.width = canvas.width;
+      offscreen.height = canvas.height;
+      const oCtx = offscreen.getContext('2d');
+
+      // 1. Solid crisp white background
+      oCtx.fillStyle = '#ffffff';
+      oCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+
+      // 2. Composite background grid if present
+      if (bgCanvas && gridMode !== 'none') {
+        oCtx.drawImage(bgCanvas, 0, 0);
+      }
+
+      // 3. Composite all drawings, shapes, tables, notes
+      oCtx.drawImage(canvas, 0, 0);
+
+      // 4. Download high-res PNG image
+      const dataUrl = offscreen.toDataURL('image/png');
+      const a = document.createElement('a');
+      const safeTitle = (roomData?.title || room.title || 'whiteboard').replace(/[^a-zA-Z0-9]/g, '_');
+      a.download = `${safeTitle}_snapshot_${Date.now()}.png`;
+      a.href = dataUrl;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      showNotification('📸 Screenshot downloaded successfully!');
+    } catch (err) {
+      console.error('Screenshot error:', err);
+      alert('Failed to generate screenshot: ' + err.message);
+    }
+  };
+
+  const handlePublishMilestone = (title) => {
+    const unUndoneActions = actions.filter(a => !a.undone);
+    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'save_milestone',
+        title,
+        snapshot: unUndoneActions
+      }));
+      showNotification(`🏆 Published milestone "${title}" to room works!`);
+    } else {
+      const ms = {
+        id: `ms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title,
+        author_name: user?.name || 'Local User',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        snapshot: unUndoneActions
+      };
+      setMilestones(prev => [ms, ...prev]);
+      showNotification(`🏆 Saved local milestone: "${title}"`);
+    }
+  };
+
+  const handleShareWithMember = (targetUserCode) => {
+    const unUndoneActions = actions.filter(a => !a.undone);
+    const bundle = {
+      version: '2.0.0',
+      title: roomData?.title || room.title || 'Whiteboard Session',
+      room_code: room.code,
+      exported_at: new Date().toISOString(),
+      action_count: unUndoneActions.length,
+      actions: unUndoneActions,
+      milestones: milestones
+    };
+
+    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'share_session_bundle',
+        target_user_code: targetUserCode,
+        bundle
+      }));
+      showNotification(`📤 Whiteboard bundle sent to member!`);
+    }
+  };
+
   return (
     <div className="relative w-screen h-screen overflow-hidden select-none bg-slate-100 font-sans">
-      {/* Top Left Navigation Header */}
-      <div className="fixed top-3 left-3 z-20 flex items-center gap-2">
-        <button
-          onClick={onBackToHub}
-          className="p-2 bg-white/95 backdrop-blur-md hover:bg-slate-100 text-slate-700 rounded-xl shadow-md border border-slate-200 transition flex items-center gap-1.5 text-xs font-bold"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span className="hidden sm:inline">Hub</span>
-        </button>
+      {/* ── TIER 1: FIXED TOP GLOBAL NAVIGATION HEADER BAR ── */}
+      <header className="fixed top-0 left-0 right-0 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200/90 z-30 px-3 sm:px-4 flex items-center justify-between shadow-xs">
+        {/* Left: Back to Hub & Room Title & Code Badge */}
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button
+            onClick={onBackToHub}
+            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition flex items-center gap-1.5 text-xs font-bold shrink-0"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Hub</span>
+          </button>
 
-        {/* Room Code Badge */}
-        <div
-          onClick={copyRoomCode}
-          title="Click to copy Room Code"
-          className="px-3 py-1.5 bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200 cursor-pointer hover:bg-slate-50 transition flex items-center gap-2"
-        >
-          <span className="text-xs font-bold text-slate-800 line-clamp-1 max-w-[120px] sm:max-w-xs">{room.title}</span>
-          <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-700 font-mono font-bold text-xs">
-            {room.code}
-          </span>
-          {copiedCode && <span className="text-[10px] text-green-600 font-bold">Copied!</span>}
+          <div
+            onClick={copyRoomCode}
+            title={isOffline ? "Personal offline workspace" : "Click to copy Room Code"}
+            className="flex items-center gap-2 px-2.5 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl cursor-pointer transition min-w-0"
+          >
+            <span className="text-xs font-bold text-slate-800 truncate max-w-[120px] sm:max-w-xs md:max-w-sm">
+              {roomData?.title || room.title}
+            </span>
+            {isOffline ? (
+              <span className="px-2 py-0.5 rounded-lg bg-teal-100 text-teal-800 text-[10px] font-bold uppercase tracking-wider shrink-0">
+                Personal Offline
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-lg bg-blue-100 text-blue-700 font-mono font-bold text-xs shrink-0 flex items-center gap-1">
+                {room.code}
+                {copiedCode && <Check className="w-3 h-3 text-green-600" />}
+              </span>
+            )}
+          </div>
         </div>
-      </div>
+
+        {/* Right: Actions (Screenshot & Share, Add Member, Milestones, Participants, Chat) */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Screenshot & Share Bundle Modal Trigger */}
+          <button
+            onClick={() => setIsExportModalOpen(true)}
+            title="Take Screenshot, Export Bundle, or Share with Member"
+            className="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-2xs"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Export & Share</span>
+          </button>
+
+          {/* Add Member button (Host & Co-host) */}
+          {!isOffline && (isHost || isCohost) && (
+            <button
+              onClick={() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: 'list_connected_users' }));
+                }
+                setIsAddMemberOpen(true);
+              }}
+              className="px-2.5 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition flex items-center gap-1.5 text-xs font-bold"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Add Member</span>
+            </button>
+          )}
+
+          {/* Milestones / Instances */}
+          <button
+            onClick={() => setIsMilestonesOpen(true)}
+            className="p-1.5 sm:px-2.5 sm:py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition flex items-center gap-1 text-xs font-bold"
+            title="Whiteboard Instances & History"
+          >
+            <History className="w-4 h-4 text-violet-600" />
+            <span className="hidden lg:inline text-slate-600">Instances</span>
+          </button>
+
+          {!isOffline && (
+            <>
+              {/* Participants drawer toggle */}
+              <button
+                onClick={() => {
+                  setIsParticipantsOpen(!isParticipantsOpen);
+                  setIsChatOpen(false);
+                }}
+                className={`px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition flex items-center gap-1.5 text-xs font-bold ${
+                  isParticipantsOpen ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+                }`}
+                title="Participants & Host Controls"
+              >
+                <Users className="w-4 h-4 text-blue-600" />
+                <span className="hidden sm:inline">{members.length}</span>
+              </button>
+
+              {/* Chat drawer toggle */}
+              <button
+                onClick={() => {
+                  setIsChatOpen(!isChatOpen);
+                  setIsParticipantsOpen(false);
+                }}
+                className={`px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition flex items-center gap-1.5 text-xs font-bold ${
+                  isChatOpen ? 'ring-2 ring-indigo-500 bg-indigo-50' : ''
+                }`}
+                title="Session Chat"
+              >
+                <MessageSquare className="w-4 h-4 text-indigo-600" />
+                <span className="hidden sm:inline">Chat</span>
+              </button>
+            </>
+          )}
+        </div>
+      </header>
 
       {/* Floating Center Notification Toast */}
       {roomNotification && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white rounded-full shadow-2xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-fade-in pointer-events-none">
+        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white rounded-full shadow-2xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-fade-in pointer-events-none">
           <span>{roomNotification}</span>
         </div>
       )}
 
       {/* Blocked View-Only Banner */}
       {!myPermissions.can_draw && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 bg-red-600/95 backdrop-blur-md text-white rounded-full shadow-lg text-xs font-bold flex items-center gap-2 animate-fade-in">
+        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 bg-red-600/95 backdrop-blur-md text-white rounded-full shadow-lg text-xs font-bold flex items-center gap-2 animate-fade-in">
           <Lock className="w-3.5 h-3.5" />
           <span>You are in View-Only mode. Drawing is paused by the Host.</span>
         </div>
       )}
 
-      {/* Top Floating Primary Toolbar */}
+      {/* ── TIER 2: FLOATING PRIMARY TOOLBAR (POSITIONED BELOW HEADER) ── */}
       <Toolbar
         activeTool={activeTool}
         setActiveTool={setActiveTool}
@@ -1207,6 +1516,7 @@ export default function Whiteboard({
         onClearCanvas={handleClearCanvas}
         onInkToFont={handleInkToFont}
         onOpenTableModal={() => setIsTableModalOpen(true)}
+        onOpenShapesModal={() => setIsShapesModalOpen(true)}
         onResetView={handleResetView}
         canUndo={actions.some(a => !a.undone)}
         canRedo={redoStack.length > 0}
@@ -1214,55 +1524,6 @@ export default function Whiteboard({
         setZoom={setZoom}
         canDraw={myPermissions.can_draw}
       />
-
-      {/* Top Right Drawer Toggles */}
-      <div className="fixed top-3 right-3 z-20 flex items-center gap-1.5">
-        {/* Add Member button (Host & Co-host) */}
-        {(isHost || isCohost) && (
-          <button
-            onClick={() => {
-              if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'list_connected_users' }));
-              }
-              setIsAddMemberOpen(true);
-            }}
-            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition flex items-center gap-1.5 text-xs font-bold"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Add Member</span>
-          </button>
-        )}
-
-        <button
-          onClick={() => setIsMilestonesOpen(true)}
-          className="p-2 bg-white/95 backdrop-blur-md hover:bg-slate-100 text-slate-700 rounded-xl shadow-md border border-slate-200 transition"
-          title="Milestone Instances"
-        >
-          <History className="w-4 h-4 text-violet-600" />
-        </button>
-
-        <button
-          onClick={() => {
-            setIsParticipantsOpen(!isParticipantsOpen);
-            setIsChatOpen(false);
-          }}
-          className={`px-3 py-2 bg-white/95 backdrop-blur-md text-slate-700 rounded-xl shadow-md border border-slate-200 transition flex items-center gap-1.5 text-xs font-bold ${isParticipantsOpen ? 'ring-2 ring-blue-500' : ''}`}
-        >
-          <Users className="w-4 h-4 text-blue-600" />
-          <span className="hidden sm:inline">{members.length}</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setIsChatOpen(!isChatOpen);
-            setIsParticipantsOpen(false);
-          }}
-          className={`px-3 py-2 bg-white/95 backdrop-blur-md text-slate-700 rounded-xl shadow-md border border-slate-200 transition flex items-center gap-1.5 text-xs font-bold ${isChatOpen ? 'ring-2 ring-blue-500' : ''}`}
-        >
-          <MessageSquare className="w-4 h-4 text-indigo-600" />
-          <span className="hidden sm:inline">Chat</span>
-        </button>
-      </div>
 
       {/* Background Infinite Grid Layer */}
       <canvas
@@ -1352,19 +1613,43 @@ export default function Whiteboard({
         onCreateTable={handleCreateTable}
       />
 
+      <ShapesModal
+        isOpen={isShapesModalOpen}
+        onClose={() => setIsShapesModalOpen(false)}
+        activeShape={activeShape}
+        onSelectShape={(shapeId) => {
+          setActiveShape(shapeId);
+          setActiveTool('shape');
+        }}
+      />
+
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        roomTitle={roomData?.title || room.title}
+        roomCode={room.code}
+        actions={actions}
+        milestones={milestones}
+        members={members}
+        canSaveMilestone={isHost || isCohost || myPermissions.can_save_instance !== false}
+        onTakeScreenshot={handleTakeScreenshot}
+        onPublishMilestone={handlePublishMilestone}
+        onShareWithMember={handleShareWithMember}
+      />
+
       <InstancesModal
         isOpen={isMilestonesOpen}
         onClose={() => setIsMilestonesOpen(false)}
         milestones={milestones}
         onSaveMilestone={(title) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'save_milestone', title, snapshot: actions }));
-          }
+          handlePublishMilestone(title);
         }}
         onRestoreMilestone={(snapshot, title) => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
+          setActions(snapshot || []);
+          if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'restore_milestone', actions: snapshot, title }));
           }
+          showNotification(`🔄 Canvas restored to milestone "${title}"`);
         }}
         canRestore={isHost || isCohost}
         canSave={true}
@@ -1379,7 +1664,7 @@ export default function Whiteboard({
 
       {/* Bottom Status Pill */}
       <div className="fixed bottom-3 left-4 z-20 px-3 py-1 bg-white/90 backdrop-blur-md rounded-full shadow-md border border-slate-200 text-[11px] text-slate-600 font-medium flex items-center gap-1.5">
-        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+        <span className={`w-2 h-2 rounded-full ${isOffline ? 'bg-teal-500' : 'bg-emerald-500'}`} />
         {statusText}
       </div>
     </div>

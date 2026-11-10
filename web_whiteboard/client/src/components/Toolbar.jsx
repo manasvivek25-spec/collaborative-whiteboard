@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   Pencil,
   Brush,
   Highlighter,
   Eraser,
   Square,
-  Circle,
   Minus,
   ArrowRight,
   Diamond,
@@ -18,13 +17,13 @@ import {
   Trash2,
   ZoomIn,
   ZoomOut,
-  Maximize2,
   Table as TableIcon,
   Grid3X3,
   Hand,
   Lock,
   RotateCcw
 } from 'lucide-react';
+import { SHAPES_LIST } from './ShapesModal';
 
 const COLORS = [
   '#000000', '#ef4444', '#f97316', '#eab308', 
@@ -50,6 +49,7 @@ export default function Toolbar({
   onClearCanvas,
   onInkToFont,
   onOpenTableModal,
+  onOpenShapesModal,
   onResetView,
   canUndo = false,
   canRedo = false,
@@ -57,27 +57,8 @@ export default function Toolbar({
   setZoom,
   canDraw = true
 }) {
-  const [showShapeMenu, setShowShapeMenu] = useState(false);
-  const [showGridMenu, setShowGridMenu] = useState(false);
-
-  const shapes = [
-    { id: 'rect', label: 'Rectangle', icon: Square },
-    { id: 'circle', label: 'Circle', icon: Circle },
-    { id: 'line', label: 'Line', icon: Minus },
-    { id: 'arrow', label: 'Arrow', icon: ArrowRight },
-    { id: 'diamond', label: 'Diamond', icon: Diamond },
-    { id: 'star', label: 'Star', icon: Star },
-  ];
-
-  const gridOptions = [
-    { id: 'none', label: 'Plain (No Grid)' },
-    { id: 'square', label: 'Square (Graph Grid)' },
-    { id: 'dot', label: 'Dot Matrix' },
-    { id: 'ruled', label: 'Ruled Notebook' },
-  ];
-
   return (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none">
+    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none">
       
       {/* Blocked indicator if Host disabled drawing */}
       {!canDraw && (
@@ -154,41 +135,20 @@ export default function Toolbar({
           onClick={() => {
             if (!canDraw) return;
             setActiveTool('shape');
-            setShowShapeMenu(!showShapeMenu);
+            onOpenShapesModal();
           }}
-          title="Shapes"
+          title={`Shape: ${activeShape} (Click to pick shapes)`}
           className={`p-2 rounded-xl flex items-center gap-1 transition ${
             !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
             activeTool === 'shape' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
           {(() => {
-            const S = shapes.find(s => s.id === activeShape)?.icon || Square;
-            return <S className="w-4 h-4" />;
+            const shapeObj = SHAPES_LIST.find(s => s.id === activeShape);
+            const Icon = shapeObj?.icon || Square;
+            return <Icon className="w-4 h-4" />;
           })()}
         </button>
-
-        {showShapeMenu && canDraw && (
-          <div className="absolute top-12 left-0 p-2 bg-white rounded-xl shadow-xl border border-slate-200 grid grid-cols-3 gap-1 z-50 animate-fade-in w-36">
-            {shapes.map((s) => {
-              const Icon = s.icon;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => {
-                    setActiveShape(s.id);
-                    setActiveTool('shape');
-                    setShowShapeMenu(false);
-                  }}
-                  title={s.label}
-                  className={`p-2 rounded-lg flex justify-center hover:bg-slate-100 transition ${activeShape === s.id && activeTool === 'shape' ? 'bg-blue-100 text-blue-700' : 'text-slate-700'}`}
-                >
-                  <Icon className="w-4 h-4" />
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         {/* Table Tool */}
         <button
@@ -244,7 +204,7 @@ export default function Toolbar({
         </button>
       </div>
 
-      {/* Grid Style Cycler (1-Click Cycle: None -> Square -> Dot -> Ruled) */}
+      {/* Grid Style Cycler (1-Click Cycle: Square -> Dot -> Ruled -> None) */}
       <div className="pr-1.5 border-r border-slate-200">
         <button
           onClick={onCycleGrid}

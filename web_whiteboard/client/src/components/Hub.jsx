@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Globe,
   Wifi,
@@ -16,7 +16,9 @@ import {
   Layers,
   FileText,
   Clock,
-  Play
+  Play,
+  Upload,
+  Trash2
 } from 'lucide-react';
 
 export default function Hub({
@@ -33,6 +35,7 @@ export default function Hub({
   const [copiedCode, setCopiedCode] = useState(null);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Load user's enrolled rooms from database & localStorage personal boards
   useEffect(() => {
@@ -84,6 +87,48 @@ export default function Hub({
     const updated = [newBoard, ...personalBoards];
     savePersonalBoards(updated);
     onOpenBoard({ room: { code: newBoard.id, title: newBoard.title }, isOffline: true });
+  };
+
+  const handleImportWhiteboard = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        const importedActions = data.actions || (Array.isArray(data) ? data : []);
+        const rawTitle = data.title || file.name.replace(/\.[^/.]+$/, "");
+        const newBoard = {
+          id: `pers_import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          title: `${rawTitle} (Local Copy)`,
+          created_at: new Date().toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          actions: importedActions
+        };
+
+        // Persist offline actions locally
+        localStorage.setItem(`offline_actions_${newBoard.id}`, JSON.stringify(importedActions));
+        const updated = [newBoard, ...personalBoards];
+        savePersonalBoards(updated);
+
+        e.target.value = '';
+
+        alert(`Successfully imported "${newBoard.title}" into Personal Space!\n\nThis board is completely local on your device and will NOT interfere with the live collaborative session.`);
+        onOpenBoard({ room: { code: newBoard.id, title: newBoard.title, actions: importedActions }, isOffline: true });
+      } catch (err) {
+        alert('Invalid whiteboard package file: ' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDeletePersonalBoard = (id, e) => {
+    e.stopPropagation();
+    if (window.confirm('Delete this local personal board?')) {
+      const updated = personalBoards.filter(b => b.id !== id);
+      savePersonalBoards(updated);
+      localStorage.removeItem(`offline_actions_${id}`);
+    }
   };
 
   const handleCreateGroupRoom = async (mode) => {
@@ -406,36 +451,62 @@ export default function Hub({
         ) : (
           /* Personal Workspace Tab */
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-teal-600" />
                   Your Personal Whiteboards (Offline & Private)
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Private boards saved locally on this PC for drafting, sketching, and notes:
+                  Private boards saved locally on this device. Completely isolated from group sessions:
                 </p>
               </div>
-              <button
-                onClick={handleCreatePersonalBoard}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                New Personal Board
-              </button>
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleImportWhiteboard}
+                  accept=".whiteboard,.json"
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Import Whiteboard
+                </button>
+                <button
+                  onClick={handleCreatePersonalBoard}
+                  className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  New Board
+                </button>
+              </div>
             </div>
 
             {filteredPersonal.length === 0 ? (
               <div className="p-12 border-2 border-dashed border-slate-200 rounded-2xl text-center bg-white">
                 <FileText className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                 <p className="text-sm font-semibold text-slate-700">No personal whiteboards yet</p>
-                <p className="text-xs text-slate-400 mt-1">Create an offline personal board to draw or import bundles.</p>
-                <button
-                  onClick={handleCreatePersonalBoard}
-                  className="mt-4 px-4 py-2 bg-teal-600 text-white rounded-xl text-xs font-bold"
-                >
-                  + Create Board
-                </button>
+                <p className="text-xs text-slate-400 mt-1">Create an offline personal board or import a .whiteboard package file.</p>
+                <div className="flex justify-center gap-3 mt-4">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    Import File
+                  </button>
+                  <button
+                    onClick={handleCreatePersonalBoard}
+                    className="px-4 py-2 bg-teal-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Create Board
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -449,7 +520,14 @@ export default function Hub({
                       <p className="text-[11px] text-slate-400 mt-1">Created: {b.created_at}</p>
                     </div>
 
-                    <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                    <div className="pt-4 mt-3 border-t border-slate-100 flex items-center justify-between">
+                      <button
+                        onClick={(e) => handleDeletePersonalBoard(b.id, e)}
+                        title="Delete Personal Board"
+                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => onOpenBoard({ room: { code: b.id, title: b.title }, isOffline: true })}
                         className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-sm transition flex items-center gap-1"

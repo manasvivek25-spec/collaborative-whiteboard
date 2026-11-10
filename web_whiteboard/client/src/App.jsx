@@ -155,7 +155,7 @@ export default function App() {
           room={activeRoom}
           user={user}
           onBackToHub={() => setCurrentView('hub')}
-          ws={wsRef.current}
+          ws={isOfflineBoard ? null : wsRef.current}
           isOffline={isOfflineBoard}
         />
       )}

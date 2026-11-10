@@ -765,6 +765,32 @@ function handleWsMessage(ws, msg) {
       }));
       break;
     }
+
+    // 15. Share Whiteboard Session Bundle with a Member
+    case 'share_session_bundle': {
+      const targetUserCode = msg.target_user_code;
+      if (!targetUserCode) return;
+      const bundle = msg.bundle;
+      const delivered = sendToUser(targetUserCode, {
+        type: 'received_session_bundle',
+        sender_code: meta.user_code,
+        sender_name: meta.user_name,
+        room_code: meta.room_code,
+        bundle
+      });
+      if (delivered) {
+        ws.send(JSON.stringify({
+          type: 'notice',
+          text: `Whiteboard session bundle sent to member!`
+        }));
+      } else {
+        ws.send(JSON.stringify({
+          type: 'notice',
+          text: `User is currently not online to receive live push. You can export as a .whiteboard file to send directly!`
+        }));
+      }
+      break;
+    }
   }
 }
 
