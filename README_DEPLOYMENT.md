@@ -78,3 +78,23 @@ Deploying to the cloud eliminates the need to run any terminal, batch file, or l
    - The server pushes a real-time invitation to the member's screen!
    - When the member accepts, they enter the room with complete drawing history and synchronized state.
 
+
+
+---
+
+## 💻 System App & Desktop Launchers (For You & Partners)
+
+The whiteboard can now be run as a **native system desktop application** (without browser toolbars, tabs, or command terminal clutter):
+
+### 1. 1-Click Desktop Shortcut (Windows)
+Double-click **`Create_Desktop_Shortcut.bat`**. This creates an official **"Collaborative Whiteboard"** shortcut directly on your Windows Desktop with its own custom app icon!
+
+### 2. Silent Desktop Launcher
+Double-click **`Collaborative_Whiteboard.vbs`** or **`Collaborative_Whiteboard.bat`**:
+- Silently boots the background server on port 5000 (no lingering black terminal windows).
+- Instantly launches the whiteboard inside a frameless native system desktop window (`--app` mode).
+
+### 3. PWA Desktop App for Any Device (Windows, Mac, iPad, Android)
+- When opening the whiteboard in Chrome, Edge, Safari, or Samsung Internet, click the **"Desktop App"** button in the header or the **Install App (+)** icon in the address bar.
+- The whiteboard installs into the host operating system, appearing in the Start Menu, Applications folder, and Taskbar.
+- Partners connected to your Wi-Fi or Mobile Hotspot can open your Host IP (e.g. `http://192.168.1.15:5000`) and tap "Desktop App" to install it directly on their devices for full offline drawing!

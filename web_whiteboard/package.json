@@ -9,11 +9,16 @@
     "install-all": "npm run install:server && npm run install:client",
     "build": "cd client && npm run build",
     "start": "cd server && node server.js",
+    "electron": "electron electron/main.cjs",
+    "app": "npm run build && electron electron/main.cjs",
     "dev:server": "cd server && node server.js",
     "dev:client": "cd client && npm run dev",
     "dev": "npm run start"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
   }
 }

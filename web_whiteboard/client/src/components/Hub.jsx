@@ -18,7 +18,9 @@ import {
   Clock,
   Play,
   Upload,
-  Trash2
+  Trash2,
+  Monitor,
+  Download
 } from 'lucide-react';
 
 export default function Hub({
@@ -39,7 +41,40 @@ export default function Hub({
   const [customHostInput, setCustomHostInput] = useState('');
   const [lanModalData, setLanModalData] = useState(null);
   const [copiedLanUrl, setCopiedLanUrl] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isStandaloneApp, setIsStandaloneApp] = useState(false);
+  const [showAppModal, setShowAppModal] = useState(false);
   const fileInputRef = useRef(null);
+
+  // Detect standalone app mode & PWA install prompts
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    if (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true ||
+      document.referrer.includes('android-app://')
+    ) {
+      setIsStandaloneApp(true);
+    }
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallAppClick = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice?.outcome === 'accepted') {
+        setIsStandaloneApp(true);
+      }
+      setDeferredPrompt(null);
+    } else {
+      setShowAppModal(true);
+    }
+  };
 
   // Load user's enrolled rooms from database & localStorage personal boards
   useEffect(() => {
@@ -255,8 +290,20 @@ export default function Hub({
           </div>
         </div>
 
-        {/* Right User Profile Capsule */}
-        <div className="flex items-center gap-3">
+        {/* Right User Profile Capsule & App Button */}
+        <div className="flex items-center gap-2.5">
+          {!isStandaloneApp && (
+            <button
+              onClick={handleInstallAppClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition hover:scale-[1.02] active:scale-[0.98]"
+              title="Launch or Install as Standalone System App"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Desktop App</span>
+              <span className="sm:hidden">App</span>
+            </button>
+          )}
+
           <div
             onClick={onOpenAccountModal}
             className="flex items-center gap-2.5 p-1.5 pr-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl cursor-pointer transition"
@@ -695,6 +742,71 @@ export default function Hub({
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Desktop App / System App Modal */}
+      {showAppModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
+                  <Monitor className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">Run as System Desktop App</h3>
+                  <p className="text-xs text-slate-500">Standalone window without browser tabs or address bar</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAppModal(false)}
+                className="w-8 h-8 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center font-bold text-lg"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4">
+              <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-xl">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center">1</span>
+                  <h4 className="text-xs font-bold text-blue-950">Option A: 1-Click Install to Desktop / Taskbar</h4>
+                </div>
+                <p className="text-xs text-blue-900 leading-relaxed pl-7">
+                  Click the <strong>Install / App</strong> icon in your browser's address bar (or browser menu &rarr; <em>"Install Collaborative Whiteboard"</em>). It pins the whiteboard directly to your Windows Start Menu, Taskbar, and Desktop as a standalone window!
+                </p>
+              </div>
+
+              <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-xl">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-bold text-[10px] flex items-center justify-center">2</span>
+                  <h4 className="text-xs font-bold text-indigo-950">Option B: Windows Standalone Desktop Launcher</h4>
+                </div>
+                <p className="text-xs text-indigo-900 leading-relaxed pl-7">
+                  Double-click <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200">Collaborative_Whiteboard.vbs</strong> or <strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200">Collaborative_Whiteboard.bat</strong> in the project folder. It launches the background server and opens an ultra-fast borderless native desktop window.
+                </p>
+              </div>
+
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-bold text-[10px] flex items-center justify-center">3</span>
+                  <h4 className="text-xs font-bold text-emerald-950">Option C: Sharing with Partners (Offline & Online)</h4>
+                </div>
+                <p className="text-xs text-emerald-900 leading-relaxed pl-7">
+                  Partners connecting to your Wi-Fi or Hotspot can open your Host URL on their laptop or tablet, then tap <strong>"Desktop App"</strong> to install the application natively on their device too!
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setShowAppModal(false)}
+                className="px-6 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition"
+              >
+                Got it
+              </button>
             </div>
           </div>
         </div>
