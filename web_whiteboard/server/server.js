@@ -312,7 +312,20 @@ function handleWsMessage(ws, msg) {
         milestones
       }));
 
-      // Broadcast user_joined to others
+      // Record & broadcast user_joined notice
+      const joinSysMsg = {
+        id: `sys_join_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        room_code: roomCode,
+        sender_code: 'system',
+        sender_name: 'System',
+        avatar_color: '#10b981',
+        message: `👋 ${userName} joined the room.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_system: true
+      };
+      db.saveChatMessage(roomCode, joinSysMsg);
+      broadcastToRoom(roomCode, { type: 'chat_message', ...joinSysMsg });
+
       broadcastToRoom(roomCode, {
         type: 'user_joined',
         user_code: userCode,
@@ -327,6 +340,14 @@ function handleWsMessage(ws, msg) {
     // 3. Real-time Drawing Stroke Points (High frequency streaming)
     case 'stroke_pts': {
       if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code === meta.user_code;
+      const members = db.getRoomMembers(meta.room_code);
+      const me = members.find(m => m.user_code === meta.user_code);
+      if (!isHost && me && !me.can_draw) {
+        return; // Drawing blocked by host
+      }
+
       broadcastToRoom(meta.room_code, {
         type: 'stroke_pts',
         id: msg.id,
@@ -341,11 +362,37 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 4. Whiteboard Action Commit (Strokes, Shapes, Text, Sticky, Eraser)
+    // 4. Whiteboard Action Commit (Strokes, Shapes, Text, Sticky, Table, Eraser)
     case 'action': {
       if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code === meta.user_code;
+      const members = db.getRoomMembers(meta.room_code);
+      const me = members.find(m => m.user_code === meta.user_code);
+      if (!isHost && me && !me.can_draw) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Drawing is currently disabled for you by the host.'
+        }));
+      }
+
       const action = msg.action;
       if (!action || !action.id) return;
+
+      if (action.kind === 'table_edit') {
+        const existingActions = db.getRoomActions(meta.room_code);
+        const targetTable = existingActions.find(a => a.id === action.target);
+        if (targetTable) {
+          if (!targetTable.cells) targetTable.cells = {};
+          targetTable.cells[`${action.r},${action.c}`] = action.text;
+          db.saveAction(meta.room_code, targetTable);
+          broadcastToRoom(meta.room_code, {
+            type: 'action',
+            action: targetTable
+          }, ws);
+          break;
+        }
+      }
 
       action.user_code = meta.user_code;
       action.user_name = meta.user_name;
@@ -542,7 +589,35 @@ function handleWsMessage(ws, msg) {
       const action = msg.action;
       const targetUserCode = msg.target_user_code;
 
-      if (action === 'toggle_draw') {
+      if (action === 'block_all') {
+        db.setAllMembersDrawingPermission(meta.room_code, 0);
+        const notice = {
+          id: `sys_perm_${Date.now()}`,
+          room_code: meta.room_code,
+          sender_code: 'system',
+          sender_name: 'System',
+          avatar_color: '#ef4444',
+          message: `🔒 Host ${meta.user_name} paused drawing permissions for all members.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          is_system: true
+        };
+        db.saveChatMessage(meta.room_code, notice);
+        broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
+      } else if (action === 'allow_all') {
+        db.setAllMembersDrawingPermission(meta.room_code, 1);
+        const notice = {
+          id: `sys_perm_${Date.now()}`,
+          room_code: meta.room_code,
+          sender_code: 'system',
+          sender_name: 'System',
+          avatar_color: '#10b981',
+          message: `🔓 Host ${meta.user_name} enabled drawing permissions for all members.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          is_system: true
+        };
+        db.saveChatMessage(meta.room_code, notice);
+        broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
+      } else if (action === 'toggle_draw') {
         const canDraw = msg.can_draw !== undefined ? msg.can_draw : 1;
         db.updateMemberPermission(meta.room_code, targetUserCode, canDraw);
       } else if (action === 'promote_cohost') {
@@ -720,10 +795,26 @@ function leaveCurrentRoom(ws) {
     if (wsSet.size === 0) {
       roomMap.delete(userCode);
       const members = db.getRoomMembers(roomCode);
+
+      // Record in permanent chat log and broadcast
+      const leaveSysMsg = {
+        id: `sys_left_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        room_code: roomCode,
+        sender_code: 'system',
+        sender_name: 'System',
+        avatar_color: '#ef4444',
+        message: `🚪 ${meta.user_name || 'A user'} left the room.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_system: true
+      };
+      db.saveChatMessage(roomCode, leaveSysMsg);
+      broadcastToRoom(roomCode, { type: 'chat_message', ...leaveSysMsg });
+
       broadcastToRoom(roomCode, {
         type: 'user_left',
         user_code: userCode,
         user_name: meta.user_name,
+        message: `${meta.user_name || 'A user'} left the room`,
         members: getOnlineStatusMembers(roomCode, members)
       });
     }

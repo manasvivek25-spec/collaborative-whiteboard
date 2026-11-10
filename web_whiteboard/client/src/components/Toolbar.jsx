@@ -18,7 +18,12 @@ import {
   Trash2,
   ZoomIn,
   ZoomOut,
-  Maximize2
+  Maximize2,
+  Table as TableIcon,
+  Grid3X3,
+  Hand,
+  Lock,
+  RotateCcw
 } from 'lucide-react';
 
 const COLORS = [
@@ -37,10 +42,14 @@ export default function Toolbar({
   setStrokeColor,
   strokeWidth,
   setStrokeWidth,
+  gridMode = 'square',
+  setGridMode,
   onUndo,
   onRedo,
   onClearCanvas,
   onInkToFont,
+  onOpenTableModal,
+  onResetView,
   canUndo = false,
   canRedo = false,
   zoom = 1,
@@ -48,7 +57,7 @@ export default function Toolbar({
   canDraw = true
 }) {
   const [showShapeMenu, setShowShapeMenu] = useState(false);
-  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [showGridMenu, setShowGridMenu] = useState(false);
 
   const shapes = [
     { id: 'rect', label: 'Rectangle', icon: Square },
@@ -59,52 +68,98 @@ export default function Toolbar({
     { id: 'star', label: 'Star', icon: Star },
   ];
 
+  const gridOptions = [
+    { id: 'none', label: 'Plain (No Grid)' },
+    { id: 'square', label: 'Square (Graph Grid)' },
+    { id: 'dot', label: 'Dot Matrix' },
+    { id: 'ruled', label: 'Ruled Notebook' },
+  ];
+
   return (
-    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80">
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none">
+      
+      {/* Blocked indicator if Host disabled drawing */}
+      {!canDraw && (
+        <div className="flex items-center gap-1 px-2.5 py-1 bg-red-100 text-red-700 font-bold text-xs rounded-xl border border-red-200 mr-1 whitespace-nowrap">
+          <Lock className="w-3.5 h-3.5" />
+          <span>View Only</span>
+        </div>
+      )}
+
+      {/* Pan / Hand Tool for Infinite Canvas */}
+      <button
+        onClick={() => setActiveTool('pan')}
+        title="Pan / Hand Tool: Drag canvas infinitely"
+        className={`p-2 rounded-xl transition ${activeTool === 'pan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+      >
+        <Hand className="w-4 h-4" />
+      </button>
+
       {/* Primary Drawing Tools */}
-      <div className="flex items-center gap-1 pr-2 border-r border-slate-200">
+      <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200">
         <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('pencil')}
           title="Pencil"
-          className={`p-2 rounded-xl transition ${activeTool === 'pencil' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'pencil' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <Pencil className="w-4 h-4" />
         </button>
 
         <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('brush')}
           title="Smooth Calligraphy Brush"
-          className={`p-2 rounded-xl transition ${activeTool === 'brush' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'brush' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <Brush className="w-4 h-4" />
         </button>
 
         <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('highlighter')}
           title="Highlighter"
-          className={`p-2 rounded-xl transition ${activeTool === 'highlighter' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'highlighter' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <Highlighter className="w-4 h-4" />
         </button>
 
         <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('eraser')}
-          title="Eraser"
-          className={`p-2 rounded-xl transition ${activeTool === 'eraser' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          title="Eraser (Erases ink without touching grid)"
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'eraser' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <Eraser className="w-4 h-4" />
         </button>
       </div>
 
       {/* Shapes & Objects */}
-      <div className="relative flex items-center gap-1 pr-2 border-r border-slate-200">
+      <div className="relative flex items-center gap-1 pr-1.5 border-r border-slate-200">
         <button
+          disabled={!canDraw}
           onClick={() => {
+            if (!canDraw) return;
             setActiveTool('shape');
             setShowShapeMenu(!showShapeMenu);
           }}
           title="Shapes"
-          className={`p-2 rounded-xl flex items-center gap-1 transition ${activeTool === 'shape' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl flex items-center gap-1 transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'shape' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           {(() => {
             const S = shapes.find(s => s.id === activeShape)?.icon || Square;
@@ -112,7 +167,7 @@ export default function Toolbar({
           })()}
         </button>
 
-        {showShapeMenu && (
+        {showShapeMenu && canDraw && (
           <div className="absolute top-12 left-0 p-2 bg-white rounded-xl shadow-xl border border-slate-200 grid grid-cols-3 gap-1 z-50 animate-fade-in w-36">
             {shapes.map((s) => {
               const Icon = s.icon;
@@ -134,39 +189,101 @@ export default function Toolbar({
           </div>
         )}
 
+        {/* Table Tool */}
         <button
+          disabled={!canDraw}
+          onClick={() => {
+            if (!canDraw) return;
+            onOpenTableModal();
+          }}
+          title="Insert Table Grid (Enter Rows x Columns)"
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'table' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <TableIcon className="w-4 h-4" />
+        </button>
+
+        <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('text')}
           title="Text Box"
-          className={`p-2 rounded-xl transition ${activeTool === 'text' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'text' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <Type className="w-4 h-4" />
         </button>
 
         <button
+          disabled={!canDraw}
           onClick={() => setActiveTool('sticky')}
           title="Sticky Note"
-          className={`p-2 rounded-xl transition ${activeTool === 'sticky' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+          className={`p-2 rounded-xl transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
+            activeTool === 'sticky' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+          }`}
         >
           <StickyNote className="w-4 h-4" />
         </button>
 
         {/* Ink-To-Font Recognition Button */}
         <button
+          disabled={!canDraw}
           onClick={onInkToFont}
-          title="Ink to Font: Convert handwriting to text typography"
-          className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition"
+          title="Ink to Font: Convert handwriting to typography"
+          className={`px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition whitespace-nowrap ${
+            !canDraw ? 'opacity-40 cursor-not-allowed' : 'hover:from-violet-700 hover:to-indigo-700'
+          }`}
         >
           <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
-          <span>Ink to Text</span>
+          <span className="hidden sm:inline">Ink to Text</span>
         </button>
       </div>
 
+      {/* Grid Style Switcher */}
+      <div className="relative pr-1.5 border-r border-slate-200">
+        <button
+          onClick={() => setShowGridMenu(!showGridMenu)}
+          title={`Canvas Grid Style: ${gridMode}`}
+          className={`p-2 rounded-xl flex items-center gap-1 transition ${gridMode !== 'none' ? 'bg-slate-100 text-blue-700' : 'text-slate-600 hover:bg-slate-100'}`}
+        >
+          <Grid3X3 className="w-4 h-4" />
+        </button>
+
+        {showGridMenu && (
+          <div className="absolute top-12 left-0 p-1.5 bg-white rounded-xl shadow-xl border border-slate-200 flex flex-col gap-1 z-50 animate-fade-in w-44">
+            <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Canvas Grid Style
+            </div>
+            {gridOptions.map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => {
+                  setGridMode(opt.id);
+                  setShowGridMenu(false);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-left text-xs font-semibold flex items-center justify-between transition ${
+                  gridMode === opt.id ? 'bg-blue-50 text-blue-700 font-bold' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <span>{opt.label}</span>
+                {gridMode === opt.id && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Colors & Stroke Width */}
-      <div className="flex items-center gap-2 pr-2 border-r border-slate-200">
+      <div className="flex items-center gap-1.5 pr-1.5 border-r border-slate-200">
         <div className="flex items-center gap-1">
-          {COLORS.slice(0, 5).map((col) => (
+          {COLORS.slice(0, 4).map((col) => (
             <button
               key={col}
+              disabled={!canDraw}
               onClick={() => setStrokeColor(col)}
               style={{ backgroundColor: col }}
               className={`w-5 h-5 rounded-full border border-slate-300 transition ${strokeColor === col ? 'ring-2 ring-blue-600 scale-110' : 'hover:scale-105'}`}
@@ -174,6 +291,7 @@ export default function Toolbar({
           ))}
           <input
             type="color"
+            disabled={!canDraw}
             value={strokeColor}
             onChange={(e) => setStrokeColor(e.target.value)}
             title="Custom Color"
@@ -182,15 +300,16 @@ export default function Toolbar({
         </div>
 
         {/* Width selection */}
-        <div className="flex items-center gap-1 ml-1">
+        <div className="flex items-center gap-0.5 ml-1">
           {STROKE_WIDTHS.map((w) => (
             <button
               key={w}
+              disabled={!canDraw}
               onClick={() => setStrokeWidth(w)}
               className={`w-5 h-5 flex items-center justify-center rounded-lg transition ${strokeWidth === w ? 'bg-blue-100 text-blue-700 font-bold' : 'text-slate-400 hover:text-slate-700'}`}
             >
               <div
-                style={{ width: Math.min(14, w * 1.5), height: Math.min(14, w * 1.5) }}
+                style={{ width: Math.min(12, w * 1.5), height: Math.min(12, w * 1.5) }}
                 className="rounded-full bg-current"
               />
             </button>
@@ -198,37 +317,47 @@ export default function Toolbar({
         </div>
       </div>
 
-      {/* History & Zoom */}
+      {/* History, Zoom & View Controls */}
       <div className="flex items-center gap-1">
         <button
           onClick={onUndo}
-          disabled={!canUndo}
+          disabled={!canUndo || !canDraw}
           title="Undo (Ctrl+Z)"
-          className={`p-2 rounded-xl transition ${canUndo ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 cursor-not-allowed'}`}
+          className={`p-2 rounded-xl transition ${canUndo && canDraw ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 cursor-not-allowed'}`}
         >
           <Undo2 className="w-4 h-4" />
         </button>
 
         <button
           onClick={onRedo}
-          disabled={!canRedo}
+          disabled={!canRedo || !canDraw}
           title="Redo (Ctrl+Y)"
-          className={`p-2 rounded-xl transition ${canRedo ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 cursor-not-allowed'}`}
+          className={`p-2 rounded-xl transition ${canRedo && canDraw ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 cursor-not-allowed'}`}
         >
           <Redo2 className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-1 px-1 text-slate-500 text-xs font-mono">
-          <button onClick={() => setZoom(Math.max(0.25, zoom - 0.1))} className="p-1 hover:text-slate-800">
+        <div className="flex items-center gap-0.5 px-1 text-slate-500 text-xs font-mono">
+          <button onClick={() => setZoom(Math.max(0.2, zoom - 0.1))} className="p-1 hover:text-slate-800">
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
-          <span>{Math.round(zoom * 100)}%</span>
+          <span className="w-9 text-center">{Math.round(zoom * 100)}%</span>
           <button onClick={() => setZoom(Math.min(3.0, zoom + 0.1))} className="p-1 hover:text-slate-800">
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
         </div>
 
+        {/* Center / Reset View */}
         <button
+          onClick={onResetView}
+          title="Center Canvas (Reset Pan & Zoom)"
+          className="p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
+        >
+          <RotateCcw className="w-4 h-4" />
+        </button>
+
+        <button
+          disabled={!canDraw}
           onClick={onClearCanvas}
           title="Clear Board"
           className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
@@ -239,4 +368,3 @@ export default function Toolbar({
     </div>
   );
 }
-

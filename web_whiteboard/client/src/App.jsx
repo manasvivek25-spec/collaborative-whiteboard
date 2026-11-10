@@ -100,7 +100,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen overflow-hidden font-sans">
+    <div className={`w-screen h-screen font-sans ${currentView === 'hub' ? 'overflow-y-auto bg-slate-50' : 'overflow-hidden'}`}>
       {/* Real-time Push Invite Notification Toast */}
       {roomInvite && (
         <div className="fixed top-5 right-5 z-50 p-4 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700 max-w-sm animate-fade-in flex flex-col gap-2.5">

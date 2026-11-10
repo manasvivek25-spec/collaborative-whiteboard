@@ -285,6 +285,16 @@ export function updateMemberPermission(roomCode, userCode, canDraw, isCohost = n
   }
 }
 
+export function setAllMembersDrawingPermission(roomCode, canDraw) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE room_members
+    SET can_draw = ?
+    WHERE UPPER(room_code) = ? AND role != 'host'
+  `);
+  stmt.run(canDraw ? 1 : 0, cleanRoom);
+}
+
 export function removeRoomMember(roomCode, userCode) {
   const stmt = db.prepare('DELETE FROM room_members WHERE UPPER(room_code) = ? AND user_code = ? AND role != "host"');
   stmt.run(roomCode.trim().toUpperCase(), userCode);
@@ -458,6 +468,7 @@ export default {
   addRoomMember,
   getRoomMembers,
   updateMemberPermission,
+  setAllMembersDrawingPermission,
   removeRoomMember,
   getUserEnrolledRooms,
   saveAction,

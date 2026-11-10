@@ -9,6 +9,8 @@ export default function ParticipantsDrawer({
   isHost = false,
   isCohost = false,
   onToggleDraw,
+  onBlockAll,
+  onAllowAll,
   onPromoteCohost,
   onKickMember,
   onOpenAddMember
@@ -52,14 +54,14 @@ export default function ParticipantsDrawer({
           </span>
           <div className="flex gap-1.5">
             <button
-              onClick={() => members.forEach(m => m.role !== 'host' && onToggleDraw(m.user_code, 0))}
-              className="px-2 py-0.5 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded text-[11px]"
+              onClick={onBlockAll}
+              className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-bold rounded-lg text-[11px] shadow-sm transition"
             >
               Block All
             </button>
             <button
-              onClick={() => members.forEach(m => m.role !== 'host' && onToggleDraw(m.user_code, 1))}
-              className="px-2 py-0.5 bg-green-100 hover:bg-green-200 text-green-700 font-semibold rounded text-[11px]"
+              onClick={onAllowAll}
+              className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-700 font-bold rounded-lg text-[11px] shadow-sm transition"
             >
               Allow All
             </button>
