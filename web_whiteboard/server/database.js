@@ -98,12 +98,34 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
 
+  CREATE TABLE IF NOT EXISTS public_works (
+    id TEXT PRIMARY KEY,
+    room_code TEXT NOT NULL,
+    title TEXT NOT NULL,
+    author_code TEXT NOT NULL,
+    author_name TEXT NOT NULL,
+    image_data TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_members_user ON room_members(user_code);
   CREATE INDEX IF NOT EXISTS idx_members_room ON room_members(room_code);
   CREATE INDEX IF NOT EXISTS idx_actions_room ON actions(room_code);
   CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages(room_code);
   CREATE INDEX IF NOT EXISTS idx_milestones_room ON milestones(room_code);
+  CREATE INDEX IF NOT EXISTS idx_public_works_room ON public_works(room_code);
 `);
+
+// Safe migrations for custom permissions
+try { db.exec("ALTER TABLE room_members ADD COLUMN can_chat INTEGER DEFAULT 1"); } catch(e) {}
+try { db.exec("ALTER TABLE room_members ADD COLUMN can_instances INTEGER DEFAULT 1"); } catch(e) {}
+try { db.exec("ALTER TABLE room_members ADD COLUMN can_public_work INTEGER DEFAULT 1"); } catch(e) {}
+
+try { db.exec("ALTER TABLE rooms ADD COLUMN canva_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN chat_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN instances_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN public_work_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
 
 /**
  * Generate a unique 8-character Account Code: USR-XXXX
@@ -456,6 +478,86 @@ export function deleteMilestone(milestoneId) {
   stmt.run(milestoneId);
 }
 
+export function updateMilestoneSnapshot(milestoneId, snapshot) {
+  const stmt = db.prepare('UPDATE milestones SET snapshot_json = ? WHERE id = ?');
+  stmt.run(JSON.stringify(snapshot || []), milestoneId);
+}
+
+/**
+ * Public Works (Shared High-Res Screenshots)
+ */
+export function savePublicWork(roomCode, work) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    INSERT INTO public_works (id, room_code, title, author_code, author_name, image_data, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      image_data = excluded.image_data
+  `);
+  stmt.run(
+    work.id,
+    cleanRoom,
+    work.title || 'Whiteboard Snapshot',
+    work.author_code || '',
+    work.author_name || work.author || 'User',
+    work.image_data || work.image || '',
+    work.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  );
+}
+
+export function getPublicWorks(roomCode) {
+  const stmt = db.prepare(`
+    SELECT id, title, author_code, author_name, image_data, timestamp, created_at
+    FROM public_works
+    WHERE UPPER(room_code) = ?
+    ORDER BY rowid DESC
+  `);
+  return stmt.all(roomCode.trim().toUpperCase());
+}
+
+export function deletePublicWork(workId) {
+  const stmt = db.prepare('DELETE FROM public_works WHERE id = ?');
+  stmt.run(workId);
+}
+
+/**
+ * Host 3-Option Permissions Control Matrix
+ */
+export function updateRoomPermissions(roomCode, perms) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE rooms 
+    SET canva_perm = COALESCE(?, canva_perm),
+        chat_perm = COALESCE(?, chat_perm),
+        instances_perm = COALESCE(?, instances_perm),
+        public_work_perm = COALESCE(?, public_work_perm),
+        updated_at = datetime('now', 'localtime')
+    WHERE UPPER(code) = ?
+  `);
+  stmt.run(perms.canva_perm || null, perms.chat_perm || null, perms.instances_perm || null, perms.public_work_perm || null, cleanRoom);
+}
+
+export function updateMemberCustomPermissions(roomCode, userCode, perms) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE room_members
+    SET can_draw = COALESCE(?, can_draw),
+        can_chat = COALESCE(?, can_chat),
+        can_instances = COALESCE(?, can_instances),
+        can_public_work = COALESCE(?, can_public_work)
+    WHERE UPPER(room_code) = ? AND user_code = ?
+  `);
+  stmt.run(
+    perms.can_draw !== undefined ? (perms.can_draw ? 1 : 0) : null,
+    perms.can_chat !== undefined ? (perms.can_chat ? 1 : 0) : null,
+    perms.can_instances !== undefined ? (perms.can_instances ? 1 : 0) : null,
+    perms.can_public_work !== undefined ? (perms.can_public_work ? 1 : 0) : null,
+    cleanRoom,
+    userCode
+  );
+}
+
 export default {
   createOrGetUser,
   getUserByCode,
@@ -465,6 +567,8 @@ export default {
   getRoom,
   listPublicRooms,
   updateRoomSettings,
+  updateRoomPermissions,
+  updateMemberCustomPermissions,
   addRoomMember,
   getRoomMembers,
   updateMemberPermission,
@@ -480,6 +584,10 @@ export default {
   clearRoomChat,
   saveMilestone,
   getRoomMilestones,
-  deleteMilestone
+  deleteMilestone,
+  updateMilestoneSnapshot,
+  savePublicWork,
+  getPublicWorks,
+  deletePublicWork
 };
 

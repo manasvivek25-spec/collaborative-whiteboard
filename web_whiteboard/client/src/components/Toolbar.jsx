@@ -21,7 +21,8 @@ import {
   Grid3X3,
   Hand,
   Lock,
-  RotateCcw
+  RotateCcw,
+  SquareDashedMousePointer
 } from 'lucide-react';
 import { SHAPES_LIST } from './ShapesModal';
 
@@ -68,10 +69,19 @@ export default function Toolbar({
         </div>
       )}
 
+      {/* Selection Tool */}
+      <button
+        onClick={() => setActiveTool('select')}
+        title="Selection Tool (V or S): Select, drag, resize, or delete elements"
+        className={`p-2 rounded-xl transition ${activeTool === 'select' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+      >
+        <SquareDashedMousePointer className="w-4 h-4" />
+      </button>
+
       {/* Pan / Hand Tool for Infinite Canvas */}
       <button
         onClick={() => setActiveTool('pan')}
-        title="Pan / Hand Tool: Drag canvas infinitely"
+        title="Pan / Hand Tool (H): Drag canvas infinitely"
         className={`p-2 rounded-xl transition ${activeTool === 'pan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
       >
         <Hand className="w-4 h-4" />

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Camera, RotateCcw, Trash2, X, Lock, CheckCircle, Clock } from 'lucide-react';
+import { Camera, RotateCcw, Trash2, X, Lock, CheckCircle, Clock, Eye, Radio, Sparkles } from 'lucide-react';
 
 export default function InstancesModal({
   isOpen,
@@ -7,8 +7,11 @@ export default function InstancesModal({
   milestones = [],
   onSaveMilestone,
   onRestoreMilestone,
+  onShowInstance,
+  onBroadcastShow,
   canRestore = false,
-  canSave = true
+  canSave = true,
+  isHost = false
 }) {
   const [title, setTitle] = useState('');
   const [activeTab, setActiveTab] = useState('list'); // 'list' | 'save'
@@ -25,7 +28,7 @@ export default function InstancesModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[85vh]">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="bg-slate-900 px-6 py-4 text-white flex justify-between items-center">
           <div className="flex items-center gap-2.5">
@@ -33,8 +36,8 @@ export default function InstancesModal({
               <Camera className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h3 className="font-bold text-sm">Session Works & Milestones</h3>
-              <p className="text-slate-400 text-xs">Save canvas checkpoints and restore previous versions</p>
+              <h3 className="font-bold text-sm">Session Works & Whiteboard Instances</h3>
+              <p className="text-slate-400 text-xs">Explore sandbox instance state or restore live collaborative canvas</p>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded-lg">
@@ -48,14 +51,14 @@ export default function InstancesModal({
             onClick={() => setActiveTab('list')}
             className={`pb-2 text-xs font-bold transition border-b-2 ${activeTab === 'list' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
-            Saved Milestones ({milestones.length})
+            Saved Instances ({milestones.length})
           </button>
           {canSave && (
             <button
               onClick={() => setActiveTab('save')}
               className={`pb-2 text-xs font-bold transition border-b-2 ${activeTab === 'save' ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
-              + Save Current Canvas
+              + Save Current Canvas Instance
             </button>
           )}
         </div>
@@ -66,7 +69,7 @@ export default function InstancesModal({
             <form onSubmit={handleSave} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                  Milestone Title
+                  Instance Title
                 </label>
                 <input
                   type="text"
@@ -74,12 +77,12 @@ export default function InstancesModal({
                   autoFocus
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Architecture Diagram v1, Math Problem 2"
+                  placeholder="e.g. Sprint 1 Brainstorm, Geometry Proof v2"
                   className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
               </div>
               <p className="text-xs text-slate-500">
-                This captures a full snapshot of all current drawings, shapes, and notes.
+                Captures a full instance snapshot. All drawings, shapes, and notes are preserved.
               </p>
               <div className="flex justify-end gap-2 pt-2">
                 <button
@@ -94,7 +97,7 @@ export default function InstancesModal({
                   className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-xl text-xs shadow-md transition flex items-center gap-1.5"
                 >
                   <Camera className="w-3.5 h-3.5" />
-                  Save Milestone
+                  Save Instance
                 </button>
               </div>
             </form>
@@ -103,50 +106,89 @@ export default function InstancesModal({
               {milestones.length === 0 ? (
                 <div className="p-8 text-center text-slate-400">
                   <Camera className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                  <p className="font-semibold text-sm">No saved milestones yet</p>
-                  <p className="text-xs mt-1">Save a snapshot of your canvas anytime to preserve your progress.</p>
+                  <p className="font-semibold text-sm">No saved instances yet</p>
+                  <p className="text-xs mt-1">Capture milestone instances anytime to explore, edit, or restore.</p>
                 </div>
               ) : (
-                milestones.map((ms) => (
-                  <div
-                    key={ms.id}
-                    className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between hover:bg-white transition shadow-sm"
-                  >
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">{ms.title}</h4>
-                      <div className="flex items-center gap-3 text-[11px] text-slate-500 mt-1">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {ms.timestamp}
-                        </span>
-                        <span>By {ms.author_name || ms.author || 'Host'}</span>
-                      </div>
-                    </div>
+                milestones.map((ms) => {
+                  const actCount = Array.isArray(ms.snapshot) ? ms.snapshot.filter(a => !a.undone).length : 0;
 
-                    <div className="flex items-center gap-2">
-                      {canRestore ? (
+                  return (
+                    <div
+                      key={ms.id}
+                      className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white transition shadow-sm"
+                    >
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900">{ms.title}</h4>
+                        <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-slate-500 mt-1">
+                          <span className="flex items-center gap-1 font-mono">
+                            <Clock className="w-3 h-3 text-slate-400" />
+                            {ms.timestamp}
+                          </span>
+                          <span>&bull;</span>
+                          <span>Saved by: <strong className="text-slate-700">{ms.author_name || ms.author || 'Host'}</strong></span>
+                          <span>&bull;</span>
+                          <span className="text-slate-400">{actCount} elements</span>
+                        </div>
+                      </div>
+
+                      {/* Action Buttons: Show vs Restore */}
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        {/* 1. SHOW / WORK IN INSTANCE (Always available) */}
                         <button
                           onClick={() => {
-                            onRestoreMilestone(ms.snapshot, ms.title);
+                            if (onShowInstance) onShowInstance(ms);
                             onClose();
                           }}
-                          className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition"
+                          title="View and work in this isolated instance without affecting the live canvas"
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 transition shadow-2xs"
                         >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          Restore
+                          <Eye className="w-3.5 h-3.5 text-amber-600" />
+                          Show / Sandbox
                         </button>
-                      ) : (
-                        <span
-                          title="Restricted: Only Host or Co-host can restore canvas state"
-                          className="px-2.5 py-1 bg-slate-200 text-slate-500 rounded-lg text-xs font-medium flex items-center gap-1 cursor-not-allowed"
-                        >
-                          <Lock className="w-3 h-3" />
-                          Host Only
-                        </span>
-                      )}
+
+                        {/* 2. BROADCAST SHOW TO ALL (Host / Authorized) */}
+                        {canRestore && onBroadcastShow && (
+                          <button
+                            onClick={() => {
+                              onBroadcastShow(ms);
+                              onClose();
+                            }}
+                            title="Show this instance to all session participants"
+                            className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition"
+                          >
+                            <Radio className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {/* 3. RESTORE TO LIVE STATE (Authorized only) */}
+                        {canRestore ? (
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Restore canvas to instance "${ms.title}"?\nThis will revert the live collaborative canvas for all participants.`)) {
+                                onRestoreMilestone(ms.snapshot, ms.title);
+                                onClose();
+                              }
+                            }}
+                            title="Restore live collaborative canvas to this milestone"
+                            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            Restore
+                          </button>
+                        ) : (
+                          <span
+                            title="Restricted: Only Host or authorized members can restore instances to live state"
+                            className="px-2.5 py-1 bg-slate-200 text-slate-500 rounded-xl text-[11px] font-medium flex items-center gap-1 cursor-not-allowed"
+                          >
+                            <Lock className="w-3 h-3" />
+                            Restore Locked
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}

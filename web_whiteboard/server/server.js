@@ -126,6 +126,7 @@ app.get('/api/rooms/:code', (req, res) => {
     const actions = db.getRoomActions(code);
     const chat = db.getChatHistory(code);
     const milestones = db.getRoomMilestones(code);
+    const publicWorks = db.getPublicWorks(code);
 
     res.json({
       success: true,
@@ -133,7 +134,8 @@ app.get('/api/rooms/:code', (req, res) => {
       members,
       actions,
       chat,
-      milestones
+      milestones,
+      public_works: publicWorks
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -295,21 +297,19 @@ function handleWsMessage(ws, msg) {
       const actions = db.getRoomActions(roomCode);
       const chat = db.getChatHistory(roomCode);
       const milestones = db.getRoomMilestones(roomCode);
+      const publicWorks = db.getPublicWorks(roomCode);
 
       // Send join acknowledgment & state snapshot
       ws.send(JSON.stringify({
         type: 'join_ack',
         room,
         is_host: isHost,
-        my_permissions: {
-          can_draw: Boolean(myMember?.can_draw),
-          role: myMember?.role || 'member',
-          can_save_instance: Boolean(myMember?.can_save_instance)
-        },
-        members: getOnlineStatusMembers(roomCode, members),
+        my_permissions: computeUserPermissions(room, myMember, isHost),
+        members: getOnlineStatusMembers(roomCode, members, room),
         actions,
         chat,
-        milestones
+        milestones,
+        public_works: publicWorks
       }));
 
       // Record & broadcast user_joined notice
@@ -634,6 +634,24 @@ function handleWsMessage(ws, msg) {
         db.updateRoomSettings(meta.room_code, { locked: msg.locked });
       } else if (action === 'presentation_mode') {
         db.updateRoomSettings(meta.room_code, { presentation_mode: msg.presentation_mode });
+      } else if (action === 'update_matrix_permissions') {
+        // Host 3-Option Permissions Matrix: canva_perm, chat_perm, instances_perm, public_work_perm
+        db.updateRoomPermissions(meta.room_code, msg.permissions || {});
+        const notice = {
+          id: `sys_perm_${Date.now()}`,
+          room_code: meta.room_code,
+          sender_code: 'system',
+          sender_name: 'System',
+          avatar_color: '#3b82f6',
+          message: `⚙️ Host ${meta.user_name} updated session permission policies.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          is_system: true
+        };
+        db.saveChatMessage(meta.room_code, notice);
+        broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
+      } else if (action === 'update_member_permission') {
+        // Granular member permission update
+        db.updateMemberCustomPermissions(meta.room_code, targetUserCode, msg.permissions || {});
       }
 
       const updatedMembers = db.getRoomMembers(meta.room_code);
@@ -642,7 +660,7 @@ function handleWsMessage(ws, msg) {
       broadcastToRoom(meta.room_code, {
         type: 'room_settings_updated',
         room: updatedRoom,
-        members: getOnlineStatusMembers(meta.room_code, updatedMembers)
+        members: getOnlineStatusMembers(meta.room_code, updatedMembers, updatedRoom)
       });
       break;
     }
@@ -791,18 +809,131 @@ function handleWsMessage(ws, msg) {
       }
       break;
     }
+
+    // 16. Save Public Work Screenshot
+    case 'save_public_work': {
+      if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code === meta.user_code;
+      const members = db.getRoomMembers(meta.room_code);
+      const me = members.find(m => m.user_code === meta.user_code);
+      const perms = computeUserPermissions(room, me, isHost);
+
+      if (!perms.can_public_work) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Sharing to public works is currently restricted by the host.'
+        }));
+      }
+
+      const work = {
+        id: `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        title: msg.title || 'Canvas Snapshot',
+        author_code: meta.user_code,
+        author_name: meta.user_name,
+        image_data: msg.image_data,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      db.savePublicWork(meta.room_code, work);
+      broadcastToRoom(meta.room_code, {
+        type: 'new_public_work',
+        work
+      });
+
+      const sysNotice = {
+        id: `sys_pw_${Date.now()}`,
+        room_code: meta.room_code,
+        sender_code: 'system',
+        sender_name: 'System',
+        avatar_color: '#8b5cf6',
+        message: `🖼️ ${meta.user_name} published screenshot '${work.title}' to Public Works.`,
+        timestamp: work.timestamp,
+        is_system: true
+      };
+      db.saveChatMessage(meta.room_code, sysNotice);
+      broadcastToRoom(meta.room_code, { type: 'chat_message', ...sysNotice });
+      break;
+    }
+
+    // 17. Delete Public Work Screenshot
+    case 'delete_public_work': {
+      if (!meta.room_code) return;
+      db.deletePublicWork(msg.id);
+      broadcastToRoom(meta.room_code, {
+        type: 'public_work_deleted',
+        id: msg.id
+      });
+      break;
+    }
+
+    // 18. Update Instance Snapshot (Work in Instance Sandbox)
+    case 'update_instance_snapshot': {
+      if (!meta.room_code) return;
+      db.updateMilestoneSnapshot(msg.instance_id, msg.snapshot);
+      broadcastToRoom(meta.room_code, {
+        type: 'instance_snapshot_updated',
+        instance_id: msg.instance_id,
+        snapshot: msg.snapshot
+      });
+      break;
+    }
+
+    // 19. Broadcast Instance Show Mode to All Members
+    case 'broadcast_instance_show': {
+      if (!meta.room_code) return;
+      broadcastToRoom(meta.room_code, {
+        type: 'show_instance_broadcast',
+        instance_id: msg.instance_id,
+        title: msg.title,
+        snapshot: msg.snapshot,
+        broadcaster_name: meta.user_name
+      });
+      break;
+    }
   }
 }
 
-function getOnlineStatusMembers(roomCode, members) {
+function computeUserPermissions(room, member, isHost) {
+  if (isHost || member?.role === 'cohost') {
+    return {
+      can_draw: true,
+      can_chat: true,
+      can_instances: true,
+      can_public_work: true,
+      role: isHost ? 'host' : 'cohost'
+    };
+  }
+
+  const canvaPerm = room?.canva_perm || 'everyone';
+  const chatPerm = room?.chat_perm || room?.chat_permission || 'everyone';
+  const instancesPerm = room?.instances_perm || 'everyone';
+  const publicWorkPerm = room?.public_work_perm || 'everyone';
+
+  return {
+    can_draw: canvaPerm === 'everyone' ? true : (canvaPerm === 'host_only' ? false : Boolean(member?.can_draw !== 0)),
+    can_chat: chatPerm === 'everyone' ? true : (chatPerm === 'host_only' ? false : Boolean(member?.can_chat !== 0)),
+    can_instances: instancesPerm === 'everyone' ? true : (instancesPerm === 'host_only' ? false : Boolean(member?.can_instances !== 0)),
+    can_public_work: publicWorkPerm === 'everyone' ? true : (publicWorkPerm === 'host_only' ? false : Boolean(member?.can_public_work !== 0)),
+    role: member?.role || 'member'
+  };
+}
+
+function getOnlineStatusMembers(roomCode, members, room) {
   const roomMap = roomSockets.get(roomCode);
+  const theRoom = room || db.getRoom(roomCode);
   return members.map(m => {
     const isOnline = Boolean(roomMap && roomMap.has(m.user_code) && roomMap.get(m.user_code).size > 0);
+    const isHost = theRoom?.host_user_code === m.user_code;
+    const perms = computeUserPermissions(theRoom, m, isHost);
     return {
       ...m,
       online: isOnline,
-      can_draw: Boolean(m.can_draw),
-      can_save_instance: Boolean(m.can_save_instance)
+      ...perms,
+      raw_can_draw: Boolean(m.can_draw !== 0),
+      raw_can_chat: Boolean(m.can_chat !== 0),
+      raw_can_instances: Boolean(m.can_instances !== 0),
+      raw_can_public_work: Boolean(m.can_public_work !== 0)
     };
   });
 }

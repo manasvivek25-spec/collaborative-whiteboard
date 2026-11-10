@@ -1,5 +1,22 @@
-import React from 'react';
-import { Users, UserPlus, Shield, Star, Ban, Check, UserMinus, X, Lock } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  Users,
+  UserPlus,
+  Shield,
+  Star,
+  Ban,
+  Check,
+  UserMinus,
+  X,
+  Lock,
+  Pencil,
+  MessageSquare,
+  History,
+  Image,
+  ChevronDown,
+  ChevronUp,
+  Settings
+} from 'lucide-react';
 
 export default function ParticipantsDrawer({
   isOpen,
@@ -8,6 +25,9 @@ export default function ParticipantsDrawer({
   currentUserCode = '',
   isHost = false,
   isCohost = false,
+  room = {},
+  onUpdateRoomPermissions,
+  onUpdateMemberCustomPermissions,
   onToggleDraw,
   onBlockAll,
   onAllowAll,
@@ -15,10 +35,34 @@ export default function ParticipantsDrawer({
   onKickMember,
   onOpenAddMember
 }) {
+  const [showMatrix, setShowMatrix] = useState(true);
+
   if (!isOpen) return null;
 
   const canManage = isHost || isCohost;
   const onlineCount = members.filter(m => m.online).length;
+
+  const canvaPerm = room?.canva_perm || 'everyone'; // 'everyone' | 'selected' | 'host_only'
+  const chatPerm = room?.chat_perm || room?.chat_permission || 'everyone';
+  const instancesPerm = room?.instances_perm || 'everyone';
+  const publicWorkPerm = room?.public_work_perm || 'everyone';
+
+  const handlePermChange = (key, val) => {
+    if (!onUpdateRoomPermissions) return;
+    onUpdateRoomPermissions({
+      canva_perm: key === 'canva' ? val : canvaPerm,
+      chat_perm: key === 'chat' ? val : chatPerm,
+      instances_perm: key === 'instances' ? val : instancesPerm,
+      public_work_perm: key === 'public_work' ? val : publicWorkPerm
+    });
+  };
+
+  const PERM_ROWS = [
+    { key: 'canva', label: 'Draw on Canvas', icon: Pencil, current: canvaPerm },
+    { key: 'chat', label: 'Chatbox Messaging', icon: MessageSquare, current: chatPerm },
+    { key: 'instances', label: 'Manage Instances', icon: History, current: instancesPerm },
+    { key: 'public_work', label: 'Share to Public Works', icon: Image, current: publicWorkPerm }
+  ];
 
   return (
     <div className="w-80 sm:w-96 bg-white border-l border-slate-200 h-full flex flex-col shadow-xl animate-slide-in z-30">
@@ -27,7 +71,7 @@ export default function ParticipantsDrawer({
         <div className="flex items-center gap-2">
           <Users className="w-4 h-4 text-blue-600" />
           <h3 className="font-bold text-sm text-slate-800">Participants</h3>
-          <span className="text-xs text-slate-500 font-medium">({members.length}) · {onlineCount} online</span>
+          <span className="text-xs text-slate-500 font-medium">({members.length}) &bull; {onlineCount} online</span>
         </div>
         <div className="flex items-center gap-1.5">
           {canManage && (
@@ -36,7 +80,7 @@ export default function ParticipantsDrawer({
               className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm transition"
             >
               <UserPlus className="w-3.5 h-3.5" />
-              Add Member
+              Add
             </button>
           )}
           <button onClick={onClose} className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-200 rounded-lg transition">
@@ -45,32 +89,59 @@ export default function ParticipantsDrawer({
         </div>
       </div>
 
-      {/* Host Controls Quick Bar */}
-      {canManage && (
-        <div className="p-3 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between text-xs">
-          <span className="font-semibold text-blue-900 flex items-center gap-1">
-            <Shield className="w-3.5 h-3.5 text-blue-600" />
-            Host Controls
-          </span>
-          <div className="flex gap-1.5">
-            <button
-              onClick={onBlockAll}
-              className="px-2.5 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-bold rounded-lg text-[11px] shadow-sm transition"
-            >
-              Block All
-            </button>
-            <button
-              onClick={onAllowAll}
-              className="px-2.5 py-1 bg-green-100 hover:bg-green-200 text-green-700 font-bold rounded-lg text-[11px] shadow-sm transition"
-            >
-              Allow All
-            </button>
-          </div>
+      {/* 3-Option Host Control Permissions Matrix (Host Only) */}
+      {isHost && (
+        <div className="border-b border-slate-200 bg-blue-50/40">
+          <button
+            onClick={() => setShowMatrix(!showMatrix)}
+            className="w-full px-3.5 py-2.5 flex items-center justify-between text-xs font-bold text-slate-700 hover:bg-blue-50 transition"
+          >
+            <span className="flex items-center gap-1.5 text-blue-900">
+              <Shield className="w-3.5 h-3.5 text-blue-600" />
+              Host Permission Matrix (3 Options)
+            </span>
+            {showMatrix ? <ChevronUp className="w-3.5 h-3.5 text-slate-400" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-400" />}
+          </button>
+
+          {showMatrix && (
+            <div className="px-3.5 pb-3 space-y-2.5 text-[11px] animate-fade-in border-t border-blue-100/60 pt-2.5">
+              {PERM_ROWS.map((row) => {
+                const Icon = row.icon;
+                return (
+                  <div key={row.key} className="flex flex-col gap-1">
+                    <span className="font-semibold text-slate-700 flex items-center gap-1">
+                      <Icon className="w-3 h-3 text-slate-500" />
+                      {row.label}
+                    </span>
+                    <div className="grid grid-cols-3 gap-1 bg-white p-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                      {[
+                        { id: 'everyone', label: 'Everyone' },
+                        { id: 'selected', label: 'Selected' },
+                        { id: 'host_only', label: 'Host Only' }
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          onClick={() => handlePermChange(row.key, opt.id)}
+                          className={`py-1 text-[10px] font-bold rounded-md transition ${
+                            row.current === opt.id
+                              ? 'bg-blue-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {/* Participants List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
         {members.map((m) => {
           const isMe = m.user_code === currentUserCode;
           const isTargetHost = m.role === 'host';
@@ -79,97 +150,67 @@ export default function ParticipantsDrawer({
           return (
             <div
               key={m.user_code}
-              className={`p-3 rounded-xl border flex items-center justify-between transition ${
+              className={`p-3 rounded-xl border flex flex-col gap-2 transition ${
                 isMe ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50/70 border-slate-200 hover:bg-white'
               }`}
             >
-              {/* Left: Avatar + Details */}
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <div
-                    style={{ backgroundColor: m.avatar_color || '#2563eb' }}
-                    className="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-sm"
-                  >
-                    {m.name?.slice(0, 2).toUpperCase() || 'U'}
+              {/* Member Top Row */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="relative shrink-0">
+                    <div
+                      style={{ backgroundColor: m.avatar_color || '#2563eb' }}
+                      className="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-sm"
+                    >
+                      {m.name?.slice(0, 2).toUpperCase() || 'U'}
+                    </div>
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                        m.online ? 'bg-green-500' : 'bg-slate-400'
+                      }`}
+                    />
                   </div>
-                  {/* Status dot */}
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-                      m.online ? 'bg-green-500' : 'bg-slate-400'
-                    }`}
-                  />
+
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-xs text-slate-800 truncate">
+                        {m.name} {isMe && '(You)'}
+                      </span>
+                      {isTargetHost ? (
+                        <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold text-[9px] rounded shrink-0">
+                          Host
+                        </span>
+                      ) : isTargetCohost ? (
+                        <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold text-[9px] rounded flex items-center gap-0.5 shrink-0">
+                          <Star className="w-2.5 h-2.5 fill-purple-700" />
+                          Co-host
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-mono">
+                      {m.user_code} {!m.online && '· offline'}
+                    </p>
+                  </div>
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-xs text-slate-800">
-                      {m.name} {isMe && '(You)'}
-                    </span>
-                    {isTargetHost ? (
-                      <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold text-[10px] rounded">
-                        Host
-                      </span>
-                    ) : isTargetCohost ? (
-                      <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold text-[10px] rounded flex items-center gap-0.5">
-                        <Star className="w-2.5 h-2.5 fill-purple-700" />
-                        Co-host
-                      </span>
-                    ) : null}
-                  </div>
-                  <p className="text-[10px] text-slate-400 font-mono">
-                    {m.user_code} {!m.online && '· offline'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Right: Permissions & Actions */}
-              <div className="flex items-center gap-1.5">
-                {/* Drawing Status Badge */}
-                {m.can_draw ? (
-                  <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-semibold rounded-md">
-                    Can Draw
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-semibold rounded-md">
-                    Blocked
-                  </span>
-                )}
-
-                {/* Host Action Buttons */}
-                {canManage && !isTargetHost && (
-                  <div className="flex items-center gap-1 ml-1">
-                    {/* Toggle Draw */}
+                {/* Host Actions: Promote Co-host / Kick */}
+                {isHost && !isTargetHost && (
+                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => onToggleDraw(m.user_code, m.can_draw ? 0 : 1)}
-                      title={m.can_draw ? 'Block Drawing' : 'Allow Drawing'}
-                      className={`p-1.5 rounded-lg text-xs font-semibold transition ${
-                        m.can_draw
-                          ? 'text-red-600 hover:bg-red-50'
-                          : 'text-green-600 hover:bg-green-50'
+                      onClick={() => onPromoteCohost(m.user_code, !isTargetCohost)}
+                      title={isTargetCohost ? 'Remove Co-host' : 'Promote to Co-host'}
+                      className={`p-1.5 rounded-lg text-xs transition ${
+                        isTargetCohost
+                          ? 'text-purple-600 bg-purple-50'
+                          : 'text-slate-400 hover:text-purple-600 hover:bg-slate-100'
                       }`}
                     >
-                      {m.can_draw ? <Ban className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                      <Star className={`w-3.5 h-3.5 ${isTargetCohost ? 'fill-purple-600' : ''}`} />
                     </button>
 
-                    {/* Star Co-host (Host only) */}
-                    {isHost && (
-                      <button
-                        onClick={() => onPromoteCohost(m.user_code, !isTargetCohost)}
-                        title={isTargetCohost ? 'Remove Co-host' : 'Promote to Co-host'}
-                        className={`p-1.5 rounded-lg text-xs transition ${
-                          isTargetCohost
-                            ? 'text-purple-600 hover:bg-purple-50'
-                            : 'text-slate-400 hover:text-purple-600 hover:bg-slate-100'
-                        }`}
-                      >
-                        <Star className={`w-3.5 h-3.5 ${isTargetCohost ? 'fill-purple-600' : ''}`} />
-                      </button>
-                    )}
-
-                    {/* Kick */}
                     <button
                       onClick={() => onKickMember(m.user_code)}
-                      title="Remove participant"
+                      title="Remove member from room"
                       className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
                     >
                       <UserMinus className="w-3.5 h-3.5" />
@@ -177,6 +218,97 @@ export default function ParticipantsDrawer({
                   </div>
                 )}
               </div>
+
+              {/* Granular Permission Toggles (When policy is 'Selected' or for Host customization) */}
+              {!isTargetHost && (
+                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                  <span className="text-slate-400 font-medium">Access:</span>
+
+                  <div className="flex items-center gap-1">
+                    {/* Canva Draw Toggle */}
+                    <button
+                      disabled={!isHost || canvaPerm !== 'selected'}
+                      onClick={() => {
+                        if (!isHost || canvaPerm !== 'selected') return;
+                        if (onUpdateMemberCustomPermissions) {
+                          onUpdateMemberCustomPermissions(m.user_code, { can_draw: !m.can_draw });
+                        } else if (onToggleDraw) {
+                          onToggleDraw(m.user_code, m.can_draw ? 0 : 1);
+                        }
+                      }}
+                      title={`Canvas Drawing: ${m.can_draw ? 'Allowed' : 'Blocked'}${canvaPerm !== 'selected' ? ` (Controlled by policy: ${canvaPerm})` : ' (Click to toggle)'}`}
+                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
+                        m.can_draw
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-red-100 text-red-700'
+                      } ${isHost && canvaPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+                    >
+                      <Pencil className="w-2.5 h-2.5" />
+                      <span>Draw</span>
+                    </button>
+
+                    {/* Chat Toggle */}
+                    <button
+                      disabled={!isHost || chatPerm !== 'selected'}
+                      onClick={() => {
+                        if (!isHost || chatPerm !== 'selected') return;
+                        if (onUpdateMemberCustomPermissions) {
+                          onUpdateMemberCustomPermissions(m.user_code, { can_chat: !m.can_chat });
+                        }
+                      }}
+                      title={`Chatbox: ${m.can_chat ? 'Allowed' : 'Blocked'}${chatPerm !== 'selected' ? ` (Controlled by policy: ${chatPerm})` : ' (Click to toggle)'}`}
+                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
+                        m.can_chat
+                          ? 'bg-indigo-100 text-indigo-800'
+                          : 'bg-slate-200 text-slate-500'
+                      } ${isHost && chatPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+                    >
+                      <MessageSquare className="w-2.5 h-2.5" />
+                      <span>Chat</span>
+                    </button>
+
+                    {/* Instances Toggle */}
+                    <button
+                      disabled={!isHost || instancesPerm !== 'selected'}
+                      onClick={() => {
+                        if (!isHost || instancesPerm !== 'selected') return;
+                        if (onUpdateMemberCustomPermissions) {
+                          onUpdateMemberCustomPermissions(m.user_code, { can_instances: !m.can_instances });
+                        }
+                      }}
+                      title={`Instances Management: ${m.can_instances ? 'Allowed' : 'Blocked'}${instancesPerm !== 'selected' ? ` (Controlled by policy: ${instancesPerm})` : ' (Click to toggle)'}`}
+                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
+                        m.can_instances
+                          ? 'bg-teal-100 text-teal-800'
+                          : 'bg-slate-200 text-slate-500'
+                      } ${isHost && instancesPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+                    >
+                      <History className="w-2.5 h-2.5" />
+                      <span>Instances</span>
+                    </button>
+
+                    {/* Public Work Toggle */}
+                    <button
+                      disabled={!isHost || publicWorkPerm !== 'selected'}
+                      onClick={() => {
+                        if (!isHost || publicWorkPerm !== 'selected') return;
+                        if (onUpdateMemberCustomPermissions) {
+                          onUpdateMemberCustomPermissions(m.user_code, { can_public_work: !m.can_public_work });
+                        }
+                      }}
+                      title={`Public Works: ${m.can_public_work ? 'Allowed' : 'Blocked'}${publicWorkPerm !== 'selected' ? ` (Controlled by policy: ${publicWorkPerm})` : ' (Click to toggle)'}`}
+                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
+                        m.can_public_work
+                          ? 'bg-violet-100 text-violet-800'
+                          : 'bg-slate-200 text-slate-500'
+                      } ${isHost && publicWorkPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+                    >
+                      <Image className="w-2.5 h-2.5" />
+                      <span>Works</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -184,4 +316,3 @@ export default function ParticipantsDrawer({
     </div>
   );
 }
-

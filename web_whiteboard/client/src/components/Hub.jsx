@@ -98,23 +98,28 @@ export default function Hub({
       try {
         const data = JSON.parse(event.target.result);
         const importedActions = data.actions || (Array.isArray(data) ? data : []);
+        const importedMilestones = data.milestones || [];
         const rawTitle = data.title || file.name.replace(/\.[^/.]+$/, "");
         const newBoard = {
           id: `pers_import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
           title: `${rawTitle} (Local Copy)`,
           created_at: new Date().toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-          actions: importedActions
+          actions: importedActions,
+          milestones: importedMilestones
         };
 
-        // Persist offline actions locally
+        // Persist offline actions & milestones locally
         localStorage.setItem(`offline_actions_${newBoard.id}`, JSON.stringify(importedActions));
+        if (importedMilestones.length > 0) {
+          localStorage.setItem(`offline_milestones_${newBoard.id}`, JSON.stringify(importedMilestones));
+        }
         const updated = [newBoard, ...personalBoards];
         savePersonalBoards(updated);
 
         e.target.value = '';
 
-        alert(`Successfully imported "${newBoard.title}" into Personal Space!\n\nThis board is completely local on your device and will NOT interfere with the live collaborative session.`);
-        onOpenBoard({ room: { code: newBoard.id, title: newBoard.title, actions: importedActions }, isOffline: true });
+        alert(`Successfully imported "${newBoard.title}" with ${importedMilestones.length} saved instances into Personal Space!\n\nThis board is completely local on your device and will NOT interfere with any live collaborative session.`);
+        onOpenBoard({ room: { code: newBoard.id, title: newBoard.title, actions: importedActions, milestones: importedMilestones }, isOffline: true });
       } catch (err) {
         alert('Invalid whiteboard package file: ' + err.message);
       }

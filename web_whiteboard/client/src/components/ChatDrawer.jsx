@@ -10,7 +10,8 @@ export default function ChatDrawer({
   onSendMessage,
   onClearChat,
   isHost = false,
-  currentUserCode = ''
+  currentUserCode = '',
+  canChat = true
 }) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -139,21 +140,28 @@ export default function ChatDrawer({
       </div>
 
       {/* Chat Input */}
-      <form onSubmit={handleSend} className="p-3 border-t border-slate-200 bg-white flex gap-2">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Type a message..."
-          className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
-        <button
-          type="submit"
-          className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition"
-        >
-          <Send className="w-4 h-4" />
-        </button>
-      </form>
+      {canChat ? (
+        <form onSubmit={handleSend} className="p-3 border-t border-slate-200 bg-white flex gap-2">
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Type a message..."
+            className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition"
+          >
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+      ) : (
+        <div className="p-3 border-t border-slate-200 bg-slate-100 text-slate-500 text-xs font-semibold flex items-center justify-center gap-1.5 text-center">
+          <ShieldAlert className="w-4 h-4 text-red-500" />
+          <span>Chatting is restricted by the Host.</span>
+        </div>
+      )}
     </div>
   );
 }

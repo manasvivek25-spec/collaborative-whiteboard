@@ -21,8 +21,10 @@ export default function ExportModal({
   milestones = [],
   members = [],
   canSaveMilestone = true,
+  canPublishPublicWork = true,
   onTakeScreenshot,
   onPublishMilestone,
+  onPublishPublicWork,
   onShareWithMember
 }) {
   const [activeTab, setActiveTab] = useState('screenshot'); // 'screenshot' | 'bundle' | 'share'
@@ -56,9 +58,13 @@ export default function ExportModal({
 
   const handlePublish = (e) => {
     e.preventDefault();
-    if (!canSaveMilestone) return;
+    if (!canPublishPublicWork && !canSaveMilestone) return;
     const title = snapshotTitle.trim() || `Snapshot ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    onPublishMilestone(title);
+    if (onPublishPublicWork) {
+      onPublishPublicWork(title);
+    } else if (onPublishMilestone) {
+      onPublishMilestone(title);
+    }
     setSnapshotTitle('');
     onClose();
   };
@@ -151,32 +157,32 @@ export default function ExportModal({
               </button>
             </div>
 
-            {/* Option B: Publish to Room Milestones */}
+            {/* Option B: Publish to Public Works Gallery */}
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
                   <Globe className="w-3.5 h-3.5 text-emerald-600" />
-                  Publish Snapshot to Room Works (Milestones)
+                  Publish Screenshot to Public Works Gallery
                 </h4>
-                {!canSaveMilestone && (
+                {!canPublishPublicWork && (
                   <span className="text-[10px] text-red-600 font-bold flex items-center gap-1">
                     <Lock className="w-3 h-3" /> Host Restricted
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-500 mb-3">
-                {canSaveMilestone
-                  ? 'Saves a checkpoint snapshot visible to all room participants in Instances.'
-                  : 'The host has restricted instance saving to hosts/co-hosts.'}
+                {canPublishPublicWork
+                  ? 'Publishes an instant high-resolution screenshot to the shared Public Works Gallery visible to everyone.'
+                  : 'The host has restricted publishing to Public Works.'}
               </p>
 
-              {canSaveMilestone && (
+              {canPublishPublicWork && (
                 <form onSubmit={handlePublish} className="flex gap-2">
                   <input
                     type="text"
                     value={snapshotTitle}
                     onChange={(e) => setSnapshotTitle(e.target.value)}
-                    placeholder="Milestone title (e.g. Sprint 1 Architecture)"
+                    placeholder="Screenshot title (e.g. Architecture Diagram, Math Proof)"
                     className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                   <button
@@ -268,3 +274,4 @@ export default function ExportModal({
     </div>
   );
 }
+
