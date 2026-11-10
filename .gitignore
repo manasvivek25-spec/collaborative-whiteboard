@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Python cache & virtualenv
+__pycache__/
+*.pyc
+*.pyo
+
+# Builds & Binaries
+dist/
+client/dist/
+*.exe
+*.zip
+saves/
+
+# Logs & temp
+*.log
+.DS_Store
+Thumbs.db
