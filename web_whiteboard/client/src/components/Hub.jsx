@@ -35,6 +35,10 @@ export default function Hub({
   const [copiedCode, setCopiedCode] = useState(null);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showCustomHostInput, setShowCustomHostInput] = useState(false);
+  const [customHostInput, setCustomHostInput] = useState('');
+  const [lanModalData, setLanModalData] = useState(null);
+  const [copiedLanUrl, setCopiedLanUrl] = useState(false);
   const fileInputRef = useRef(null);
 
   // Load user's enrolled rooms from database & localStorage personal boards
@@ -147,6 +151,14 @@ export default function Hub({
 
     setLoading(true);
     try {
+      let netInfo = null;
+      try {
+        const netRes = await fetch('/api/network-info');
+        if (netRes.ok) netInfo = await netRes.json();
+      } catch (e) {
+        console.warn('Network info unavailable:', e);
+      }
+
       const res = await fetch('/api/rooms/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -160,7 +172,28 @@ export default function Hub({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create room');
 
-      onOpenBoard({ room: data.room, isOffline: false });
+      if (mode === 'hotspot') {
+        const hostIp = netInfo?.primary_ip || window.location.hostname || '192.168.43.1';
+        setLanModalData({
+          mode: 'hotspot',
+          title: data.room.title,
+          code: data.room.code,
+          ip: hostIp,
+          url: `http://${hostIp}:5000`,
+          room: data.room
+        });
+      } else if (mode === 'localhost') {
+        setLanModalData({
+          mode: 'localhost',
+          title: data.room.title,
+          code: data.room.code,
+          ip: '127.0.0.1',
+          url: 'http://localhost:5000',
+          room: data.room
+        });
+      } else {
+        onOpenBoard({ room: data.room, isOffline: false });
+      }
     } catch (err) {
       alert(`Error creating room: ${err.message}`);
     } finally {
@@ -171,7 +204,7 @@ export default function Hub({
   const handleJoinDirect = (code) => {
     const clean = code.trim().toUpperCase();
     if (!clean) return;
-    onJoinRoom(clean);
+    onJoinRoom(clean, customHostInput.trim() || null);
   };
 
   const copyCode = (code) => {
@@ -363,27 +396,61 @@ export default function Hub({
             </div>
 
             {/* Section 2: Join Active Room */}
-            <div className="bg-white border-2 border-slate-900 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div>
-                <h3 className="font-bold text-sm text-slate-900">Join Existing Whiteboard</h3>
-                <p className="text-xs text-slate-500">Enter the 4-letter room code shared by your host:</p>
+            <div className="bg-white border-2 border-slate-900 rounded-2xl p-6 shadow-sm flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">Join Existing Whiteboard</h3>
+                  <p className="text-xs text-slate-500">Enter the 4-letter room code shared by your host:</p>
+                </div>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={joinCodeInput}
+                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    placeholder="HZSE"
+                    className="w-28 px-3 py-2 text-center text-sm font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl uppercase tracking-widest focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={() => handleJoinDirect(joinCodeInput)}
+                    className="px-5 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 shrink-0"
+                  >
+                    <span>Join Room</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2 w-full sm:w-auto">
-                <input
-                  type="text"
-                  maxLength={4}
-                  value={joinCodeInput}
-                  onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                  placeholder="HZSE"
-                  className="w-28 px-3 py-2 text-center text-sm font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl uppercase tracking-widest focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+
+              {/* Expandable Custom LAN / Hotspot IP Option for Joiner */}
+              <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
                 <button
-                  onClick={() => handleJoinDirect(joinCodeInput)}
-                  className="px-5 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+                  type="button"
+                  onClick={() => setShowCustomHostInput(!showCustomHostInput)}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1.5 transition self-start"
                 >
-                  <span>Join Room</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <Wifi className="w-3.5 h-3.5" />
+                  <span>{showCustomHostInput ? '▲ Hide Custom LAN / Hotspot Host Options' : '▼ Connect via Custom LAN / Hotspot Host IP (Zero Internet)'}</span>
                 </button>
+
+                {showCustomHostInput && (
+                  <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center gap-3 animate-fade-in">
+                    <div className="flex-1 w-full">
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                        Host Server IP & Port (e.g., 192.168.43.1:5000 or localhost:5000):
+                      </label>
+                      <input
+                        type="text"
+                        value={customHostInput}
+                        onChange={(e) => setCustomHostInput(e.target.value)}
+                        placeholder="192.168.43.1:5000"
+                        className="w-full px-3 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-500 max-w-xs">
+                      Join another device's Mobile Hotspot or Localhost session without active internet.
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -548,6 +615,90 @@ export default function Hub({
           </div>
         )}
       </main>
+
+      {/* ── HOTSPOT / LOCALHOST CONNECTION INFO MODAL (ZERO INTERNET) ── */}
+      {lanModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <span className={`p-2 rounded-xl text-white ${lanModalData.mode === 'hotspot' ? 'bg-emerald-600' : 'bg-slate-900'}`}>
+                  {lanModalData.mode === 'hotspot' ? <Wifi className="w-5 h-5" /> : <Laptop className="w-5 h-5" />}
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">
+                    {lanModalData.mode === 'hotspot' ? '⚡ Direct Hotspot Whiteboard Active' : '💻 Localhost Whiteboard Active'}
+                  </h3>
+                  <p className="text-xs text-slate-500">Zero Active Internet Connection Required</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3.5">
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-[10px] uppercase font-bold text-slate-400">4-Letter Room Code</span>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-2xl font-mono font-extrabold text-blue-600 tracking-wider">
+                    {lanModalData.code}
+                  </span>
+                  <button
+                    onClick={() => copyCode(lanModalData.code)}
+                    className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs"
+                  >
+                    {copiedCode === lanModalData.code ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedCode === lanModalData.code ? 'Copied' : 'Copy Code'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-[10px] uppercase font-bold text-slate-400">
+                  {lanModalData.mode === 'hotspot' ? 'Host Wi-Fi / Hotspot URL' : 'Localhost URL'}
+                </span>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs font-mono font-bold text-slate-800 truncate mr-2">
+                    {lanModalData.url}
+                  </span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(lanModalData.url);
+                      setCopiedLanUrl(true);
+                      setTimeout(() => setCopiedLanUrl(false), 2000);
+                    }}
+                    className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs shrink-0"
+                  >
+                    {copiedLanUrl ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedLanUrl ? 'Copied' : 'Copy URL'}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-600 space-y-1.5 bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100">
+                <p className="font-bold text-emerald-950 text-xs">How Joiners Connect Without Internet:</p>
+                <ol className="list-decimal pl-4 space-y-1 text-[11px] text-emerald-900">
+                  <li>Connect their mobile phone, tablet, or laptop to your Wi-Fi or Mobile Hotspot.</li>
+                  <li>Open <strong className="font-mono">{lanModalData.url}</strong> in any browser.</li>
+                  <li>Enter room code <strong className="font-mono">{lanModalData.code}</strong> to start drawing and chatting with zero internet!</li>
+                </ol>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={() => {
+                    const room = lanModalData.room;
+                    setLanModalData(null);
+                    onOpenBoard({ room, isOffline: false });
+                  }}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+                >
+                  <span>Enter Whiteboard Session</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

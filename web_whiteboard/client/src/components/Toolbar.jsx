@@ -56,10 +56,11 @@ export default function Toolbar({
   canRedo = false,
   zoom = 1,
   setZoom,
-  canDraw = true
+  canDraw = true,
+  hasTopBanner = false
 }) {
   return (
-    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none">
+    <div className={`fixed ${hasTopBanner ? 'top-26 sm:top-28' : 'top-16 sm:top-18'} left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none transition-all duration-200`}>
       
       {/* Blocked indicator if Host disabled drawing */}
       {!canDraw && (

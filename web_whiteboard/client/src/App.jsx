@@ -19,6 +19,9 @@ export default function App() {
   const [isOfflineBoard, setIsOfflineBoard] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(!user);
   const [roomInvite, setRoomInvite] = useState(null);
+  const [customServerHost, setCustomServerHost] = useState(() => {
+    return localStorage.getItem('whiteboard_custom_server') || '';
+  });
 
   const wsRef = useRef(null);
 
@@ -26,12 +29,18 @@ export default function App() {
   useEffect(() => {
     if (!user?.user_code) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    // In Vite dev mode, port 3000 proxies /ws to 5000, or directly connect to 5000
-    const wsUrl = process.env.NODE_ENV === 'production'
-      ? `${protocol}//${host}`
-      : `ws://${window.location.hostname}:5000`;
+    let wsUrl = '';
+    if (customServerHost) {
+      const cleanHost = customServerHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const isHttps = customServerHost.startsWith('https://');
+      wsUrl = `${isHttps ? 'wss:' : 'ws:'}//${cleanHost}`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      wsUrl = process.env.NODE_ENV === 'production'
+        ? `${protocol}//${host}`
+        : `ws://${window.location.hostname}:5000`;
+    }
 
     let socket = null;
     try {
@@ -51,7 +60,6 @@ export default function App() {
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'room_invite') {
-            // Push invitation received from Host
             setRoomInvite(msg);
           }
         } catch (err) {
@@ -67,7 +75,7 @@ export default function App() {
         socket.close();
       }
     };
-  }, [user]);
+  }, [user, customServerHost]);
 
   const handleSaveUser = (userData) => {
     setUser(userData);
@@ -81,9 +89,17 @@ export default function App() {
     setCurrentView('whiteboard');
   };
 
-  const handleJoinDirect = async (code) => {
+  const handleJoinDirect = async (code, customHost = null) => {
     try {
-      const res = await fetch(`/api/rooms/${code}`);
+      const hostToUse = customHost || customServerHost;
+      if (customHost !== null && customHost !== undefined) {
+        setCustomServerHost(customHost);
+        localStorage.setItem('whiteboard_custom_server', customHost);
+      }
+      const baseUrl = hostToUse
+        ? (hostToUse.startsWith('http') ? hostToUse : `http://${hostToUse}`).replace(/\/$/, '')
+        : '';
+      const res = await fetch(`${baseUrl}/api/rooms/${code}`);
       const data = await res.json();
       if (!res.ok || !data.room) throw new Error(data.error || 'Room not found');
 

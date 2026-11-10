@@ -14,6 +14,8 @@ echo.
 echo Press Ctrl+C anytime to stop the server.
 echo.
 
+echo Starting server and launching Whiteboard App...
+start "" http://localhost:5000
 node server/server.js
 pause
 

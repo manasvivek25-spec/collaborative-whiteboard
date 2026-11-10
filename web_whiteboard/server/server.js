@@ -16,6 +16,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import os from 'node:os';
 import db from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -42,6 +43,32 @@ const wsMeta = new WeakMap();
 // Health check for Cloud Hosting platforms (Render, Railway, etc.)
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// Network Discovery API (For zero-internet Hotspot, Wi-Fi LAN, and Localhost)
+app.get('/api/network-info', (req, res) => {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        addresses.push({
+          interface: name,
+          ip: addr.address,
+          url: `http://${addr.address}:${PORT}`
+        });
+      }
+    }
+  }
+  res.json({
+    port: PORT,
+    hostname: os.hostname(),
+    addresses,
+    primary_ip: addresses.length > 0 ? addresses[0].ip : '127.0.0.1',
+    primary_url: addresses.length > 0 ? addresses[0].url : `http://localhost:${PORT}`,
+    localhost_url: `http://localhost:${PORT}`
+  });
 });
 
 // User Account Login or Sign Up (Generates USR-XXXX code)
@@ -340,12 +367,9 @@ function handleWsMessage(ws, msg) {
     // 3. Real-time Drawing Stroke Points (High frequency streaming)
     case 'stroke_pts': {
       if (!meta.room_code) return;
-      const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code === meta.user_code;
-      const members = db.getRoomMembers(meta.room_code);
-      const me = members.find(m => m.user_code === meta.user_code);
-      if (!isHost && me && !me.can_draw) {
-        return; // Drawing blocked by host
+      const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!perms.can_draw) {
+        return; // Drawing blocked by host policy
       }
 
       broadcastToRoom(meta.room_code, {
@@ -365,11 +389,8 @@ function handleWsMessage(ws, msg) {
     // 4. Whiteboard Action Commit (Strokes, Shapes, Text, Sticky, Table, Eraser)
     case 'action': {
       if (!meta.room_code) return;
-      const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code === meta.user_code;
-      const members = db.getRoomMembers(meta.room_code);
-      const me = members.find(m => m.user_code === meta.user_code);
-      if (!isHost && me && !me.can_draw) {
+      const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!perms.can_draw) {
         return ws.send(JSON.stringify({
           type: 'error',
           text: 'Drawing is currently disabled for you by the host.'
@@ -411,6 +432,14 @@ function handleWsMessage(ws, msg) {
     case 'undo':
     case 'redo': {
       if (!meta.room_code) return;
+      const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!perms.can_draw) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Drawing actions are disabled for you by the host.'
+        }));
+      }
+
       const actionId = msg.target;
       const isUndo = type === 'undo';
 
@@ -462,6 +491,14 @@ function handleWsMessage(ws, msg) {
     // 8. Chat Message
     case 'chat_message': {
       if (!meta.room_code) return;
+      const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!perms.can_chat) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Chat messaging is disabled for you by the host.'
+        }));
+      }
+
       const text = msg.message?.trim();
       if (!text) return;
 
@@ -502,6 +539,14 @@ function handleWsMessage(ws, msg) {
     // 10. Save Canvas Milestone / Instance
     case 'save_milestone': {
       if (!meta.room_code) return;
+      const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!perms.can_instances) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Managing instances is disabled for you by the host.'
+        }));
+      }
+
       const milestone = {
         id: `ms_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         title: msg.title || 'Saved Milestone',
@@ -537,11 +582,9 @@ function handleWsMessage(ws, msg) {
     // 11. Restore Canvas Milestone (Host / Co-host restricted)
     case 'restore_milestone': {
       if (!meta.room_code) return;
-      const room = db.getRoom(meta.room_code);
-      const members = db.getRoomMembers(meta.room_code);
-      const me = members.find(m => m.user_code === meta.user_code);
+      const { isHost, me, perms } = getMemberPermissions(meta.room_code, meta.user_code);
 
-      if (room.host_user_code !== meta.user_code && me?.role !== 'cohost') {
+      if (!isHost && me?.role !== 'cohost' && !perms.can_instances) {
         return ws.send(JSON.stringify({
           type: 'error',
           text: 'Restricted: Only the host or an assigned co-host can restore canvas instances.'
@@ -549,7 +592,6 @@ function handleWsMessage(ws, msg) {
       }
 
       const actions = msg.actions || [];
-      // Replace existing room actions with the restored instance actions
       for (const a of actions) {
         a.seq = db.getNextSeq(meta.room_code);
         db.saveAction(meta.room_code, a);
@@ -577,6 +619,56 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
+    // Top-Level Matrix Permissions
+    case 'update_matrix_permissions': {
+      if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code === meta.user_code;
+      if (!isHost) {
+        return ws.send(JSON.stringify({ type: 'error', text: 'Unauthorized: Host action only' }));
+      }
+
+      db.updateRoomPermissions(meta.room_code, msg.permissions || {});
+      if (msg.permissions?.canva_perm === 'host_only') {
+        db.setAllMembersDrawingPermission(meta.room_code, 0);
+      } else if (msg.permissions?.canva_perm === 'everyone') {
+        db.setAllMembersDrawingPermission(meta.room_code, 1);
+      }
+
+      const notice = {
+        id: `sys_perm_${Date.now()}`,
+        room_code: meta.room_code,
+        sender_code: 'system',
+        sender_name: 'System',
+        avatar_color: '#3b82f6',
+        message: `⚙️ Host ${meta.user_name} updated room permission policies.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_system: true
+      };
+      db.saveChatMessage(meta.room_code, notice);
+      broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
+
+      broadcastUpdatedRoomAndPermissions(meta.room_code);
+      break;
+    }
+
+    // Top-Level Individual Member Permission Toggle
+    case 'update_member_permission': {
+      if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code === meta.user_code;
+      if (!isHost) {
+        return ws.send(JSON.stringify({ type: 'error', text: 'Unauthorized: Host action only' }));
+      }
+
+      if (msg.target_user_code) {
+        db.updateMemberCustomPermissions(meta.room_code, msg.target_user_code, msg.permissions || {});
+      }
+
+      broadcastUpdatedRoomAndPermissions(meta.room_code);
+      break;
+    }
+
     // 12. Host Controls & Permissions
     case 'host_control': {
       if (!meta.room_code) return;
@@ -591,6 +683,7 @@ function handleWsMessage(ws, msg) {
 
       if (action === 'block_all') {
         db.setAllMembersDrawingPermission(meta.room_code, 0);
+        db.updateRoomPermissions(meta.room_code, { canva_perm: 'host_only' });
         const notice = {
           id: `sys_perm_${Date.now()}`,
           room_code: meta.room_code,
@@ -605,6 +698,7 @@ function handleWsMessage(ws, msg) {
         broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
       } else if (action === 'allow_all') {
         db.setAllMembersDrawingPermission(meta.room_code, 1);
+        db.updateRoomPermissions(meta.room_code, { canva_perm: 'everyone' });
         const notice = {
           id: `sys_perm_${Date.now()}`,
           room_code: meta.room_code,
@@ -635,33 +729,17 @@ function handleWsMessage(ws, msg) {
       } else if (action === 'presentation_mode') {
         db.updateRoomSettings(meta.room_code, { presentation_mode: msg.presentation_mode });
       } else if (action === 'update_matrix_permissions') {
-        // Host 3-Option Permissions Matrix: canva_perm, chat_perm, instances_perm, public_work_perm
         db.updateRoomPermissions(meta.room_code, msg.permissions || {});
-        const notice = {
-          id: `sys_perm_${Date.now()}`,
-          room_code: meta.room_code,
-          sender_code: 'system',
-          sender_name: 'System',
-          avatar_color: '#3b82f6',
-          message: `⚙️ Host ${meta.user_name} updated session permission policies.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          is_system: true
-        };
-        db.saveChatMessage(meta.room_code, notice);
-        broadcastToRoom(meta.room_code, { type: 'chat_message', ...notice });
+        if (msg.permissions?.canva_perm === 'host_only') {
+          db.setAllMembersDrawingPermission(meta.room_code, 0);
+        } else if (msg.permissions?.canva_perm === 'everyone') {
+          db.setAllMembersDrawingPermission(meta.room_code, 1);
+        }
       } else if (action === 'update_member_permission') {
-        // Granular member permission update
         db.updateMemberCustomPermissions(meta.room_code, targetUserCode, msg.permissions || {});
       }
 
-      const updatedMembers = db.getRoomMembers(meta.room_code);
-      const updatedRoom = db.getRoom(meta.room_code);
-
-      broadcastToRoom(meta.room_code, {
-        type: 'room_settings_updated',
-        room: updatedRoom,
-        members: getOnlineStatusMembers(meta.room_code, updatedMembers, updatedRoom)
-      });
+      broadcastUpdatedRoomAndPermissions(meta.room_code);
       break;
     }
 
@@ -910,13 +988,64 @@ function computeUserPermissions(room, member, isHost) {
   const instancesPerm = room?.instances_perm || 'everyone';
   const publicWorkPerm = room?.public_work_perm || 'everyone';
 
+  const memberCanDraw = member ? Boolean(member.can_draw !== 0 && member.can_draw !== false) : true;
+  const memberCanChat = member ? Boolean(member.can_chat !== 0 && member.can_chat !== false) : true;
+  const memberCanInstances = member ? Boolean(member.can_instances !== 0 && member.can_instances !== false) : true;
+  const memberCanPublicWork = member ? Boolean(member.can_public_work !== 0 && member.can_public_work !== false) : true;
+
   return {
-    can_draw: canvaPerm === 'everyone' ? true : (canvaPerm === 'host_only' ? false : Boolean(member?.can_draw !== 0)),
-    can_chat: chatPerm === 'everyone' ? true : (chatPerm === 'host_only' ? false : Boolean(member?.can_chat !== 0)),
-    can_instances: instancesPerm === 'everyone' ? true : (instancesPerm === 'host_only' ? false : Boolean(member?.can_instances !== 0)),
-    can_public_work: publicWorkPerm === 'everyone' ? true : (publicWorkPerm === 'host_only' ? false : Boolean(member?.can_public_work !== 0)),
+    can_draw: canvaPerm === 'everyone' ? true : (canvaPerm === 'host_only' ? false : memberCanDraw),
+    can_chat: chatPerm === 'everyone' ? true : (chatPerm === 'host_only' ? false : memberCanChat),
+    can_instances: instancesPerm === 'everyone' ? true : (instancesPerm === 'host_only' ? false : memberCanInstances),
+    can_public_work: publicWorkPerm === 'everyone' ? true : (publicWorkPerm === 'host_only' ? false : memberCanPublicWork),
     role: member?.role || 'member'
   };
+}
+
+function getMemberPermissions(roomCode, userCode) {
+  const room = db.getRoom(roomCode);
+  const isHost = room?.host_user_code === userCode;
+  const members = db.getRoomMembers(roomCode);
+  const me = members.find(m => m.user_code === userCode);
+  return {
+    isHost,
+    room,
+    me,
+    perms: computeUserPermissions(room, me, isHost)
+  };
+}
+
+function broadcastUpdatedRoomAndPermissions(roomCode) {
+  const updatedMembers = db.getRoomMembers(roomCode);
+  const updatedRoom = db.getRoom(roomCode);
+  const onlineMembers = getOnlineStatusMembers(roomCode, updatedMembers, updatedRoom);
+
+  // 1. Broadcast global update
+  broadcastToRoom(roomCode, {
+    type: 'room_settings_updated',
+    room: updatedRoom,
+    members: onlineMembers
+  });
+
+  // 2. Deliver individualized computed permissions to each connected client
+  const roomMap = roomSockets.get(roomCode);
+  if (roomMap) {
+    for (const [uCode, wsSet] of roomMap.entries()) {
+      const isH = updatedRoom?.host_user_code === uCode;
+      const uMem = updatedMembers.find(m => m.user_code === uCode);
+      const computed = computeUserPermissions(updatedRoom, uMem, isH);
+      for (const s of wsSet) {
+        if (s.readyState === WebSocket.OPEN) {
+          s.send(JSON.stringify({
+            type: 'permissions_updated',
+            my_permissions: computed,
+            room: updatedRoom,
+            members: onlineMembers
+          }));
+        }
+      }
+    }
+  }
 }
 
 function getOnlineStatusMembers(roomCode, members, room) {
@@ -992,6 +1121,16 @@ function handleWsDisconnect(ws) {
       userSockets.delete(meta.user_code);
     }
   }
+}
+
+// Serve production client build statically for zero-internet / standalone app execution
+const distPath = path.join(__dirname, '../client/dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
 }
 
 server.listen(PORT, '0.0.0.0', () => {

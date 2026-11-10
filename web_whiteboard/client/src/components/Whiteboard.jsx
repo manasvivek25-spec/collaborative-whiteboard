@@ -231,6 +231,20 @@ export default function Whiteboard({
         showNotification(`🚪 ${msg.user_name || 'A user'} left the room`);
         break;
 
+      case 'permissions_updated':
+        if (msg.my_permissions) {
+          const prevDraw = myPermissions.can_draw;
+          setMyPermissions(msg.my_permissions);
+          if (prevDraw && !msg.my_permissions.can_draw) {
+            showNotification('🔒 Drawing is paused for you by the Host.');
+          } else if (!prevDraw && msg.my_permissions.can_draw) {
+            showNotification('🔓 Drawing has been enabled for you by the Host.');
+          }
+        }
+        if (msg.members) setMembers(msg.members);
+        if (msg.room) setRoomData(msg.room);
+        break;
+
       case 'members_updated':
       case 'room_settings_updated':
         if (msg.members) {
@@ -1052,6 +1066,12 @@ export default function Whiteboard({
     }
 
     const { x, y } = getCanvasCoords(e);
+
+    // If host blocked drawing, block ALL interactive canvas operations
+    if (!myPermissions.can_draw && !viewingInstance) {
+      showNotification('🔒 Drawing is disabled for you by the Host.');
+      return;
+    }
 
     // ── INTERACTION WITH TABLES ─────────────────────────────────────────
     const tables = currentDisplayActions.filter(a => a.kind === 'table' && !a.undone);
@@ -2290,9 +2310,9 @@ export default function Whiteboard({
       {/* ── INSTANCE SANDBOX MODE TOP FLOATING BANNER ── */}
       {viewingInstance && (
         <div className="fixed top-14 left-0 right-0 z-25 bg-amber-500 text-white px-4 py-2 shadow-md flex items-center justify-between text-xs font-bold animate-slide-down">
-          <div className="flex items-center gap-2">
-            <Eye className="w-4 h-4 text-amber-100 animate-pulse" />
-            <span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Eye className="w-4 h-4 text-amber-100 shrink-0 animate-pulse" />
+            <span className="truncate">
               Sandboxed in Instance: <span className="underline">{viewingInstance.title}</span> &bull; Edits here do NOT affect the live whiteboard
             </span>
           </div>
@@ -2317,18 +2337,18 @@ export default function Whiteboard({
         </div>
       )}
 
-      {/* Floating Center Notification Toast */}
-      {roomNotification && (
-        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white rounded-full shadow-2xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-fade-in pointer-events-none">
-          <span>{roomNotification}</span>
+      {/* Blocked View-Only Banner (Full-Width Top Banner) */}
+      {!myPermissions.can_draw && !viewingInstance && (
+        <div className="fixed top-14 left-0 right-0 z-25 bg-red-600/95 text-white px-4 py-1.5 shadow-md flex items-center justify-center text-xs font-bold gap-2 animate-slide-down">
+          <Lock className="w-3.5 h-3.5 text-red-200" />
+          <span>You are in View-Only mode. Drawing is paused by the Host.</span>
         </div>
       )}
 
-      {/* Blocked View-Only Banner */}
-      {!myPermissions.can_draw && !viewingInstance && (
-        <div className="fixed top-18 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 bg-red-600/95 backdrop-blur-md text-white rounded-full shadow-lg text-xs font-bold flex items-center gap-2 animate-fade-in">
-          <Lock className="w-3.5 h-3.5" />
-          <span>You are in View-Only mode. Drawing is paused by the Host.</span>
+      {/* Floating Center Notification Toast */}
+      {roomNotification && (
+        <div className="fixed top-28 left-1/2 -translate-x-1/2 z-40 px-4 py-2 bg-slate-900/90 backdrop-blur-md text-white rounded-full shadow-2xl border border-slate-700 text-xs font-semibold flex items-center gap-2 animate-fade-in pointer-events-none">
+          <span>{roomNotification}</span>
         </div>
       )}
 
@@ -2357,6 +2377,7 @@ export default function Whiteboard({
         zoom={zoom}
         setZoom={setZoom}
         canDraw={myPermissions.can_draw}
+        hasTopBanner={Boolean(viewingInstance || (!myPermissions.can_draw && !viewingInstance))}
       />
 
       {/* Background Infinite Grid Layer */}
