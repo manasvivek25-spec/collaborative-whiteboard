@@ -46,6 +46,7 @@ export default function Hub({
   const [isScanningLan, setIsScanningLan] = useState(false);
   const [discoveredLanRooms, setDiscoveredLanRooms] = useState([]);
   const [subnetVerification, setSubnetVerification] = useState(null);
+  const [netInfo, setNetInfo] = useState(null);
   const fileInputRef = useRef(null);
 
   // Detect standalone app mode & PWA install prompts
@@ -82,12 +83,25 @@ export default function Hub({
   useEffect(() => {
     fetchRooms();
     loadPersonalBoards();
+    fetchNetworkInfo();
     handleScanLan(true); // Silent scan on mount
     const timer = setInterval(() => {
       handleScanLan(true); // Silent background auto-discovery
     }, 8000);
     return () => clearInterval(timer);
   }, [user]);
+
+  const fetchNetworkInfo = async () => {
+    try {
+      const res = await fetch('/api/network-info');
+      if (res.ok) {
+        const data = await res.json();
+        setNetInfo(data);
+      }
+    } catch (e) {
+      console.warn('[Network Info note]:', e);
+    }
+  };
 
   const fetchRooms = async () => {
     if (!user?.user_code) return;
