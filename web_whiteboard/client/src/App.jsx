@@ -117,20 +117,70 @@ export default function App() {
 
   const handleJoinDirect = async (code, customHost = null) => {
     try {
+      const cleanCode = code.trim().toUpperCase();
+      if (!cleanCode) return;
+
       const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      const hostToUse = customHost || (isLoadedFromLanHost ? '' : customServerHost);
+      let hostToUse = customHost || (isLoadedFromLanHost ? '' : customServerHost);
+      let baseUrl = hostToUse
+        ? (hostToUse.startsWith('http') ? hostToUse : `http://${hostToUse}`).replace(/\/$/, '')
+        : '';
+
+      let roomFound = null;
+
+      // 1. Try local/current designated host first
+      try {
+        const res = await fetch(`${baseUrl}/api/rooms/${cleanCode}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.room) {
+            roomFound = data.room;
+          }
+        }
+      } catch (err) {
+        // Local query failed, proceed to auto-scan LAN
+      }
+
+      // 2. If not found and no specific custom host was forced, automatically search LAN hosts via UDP
+      if (!roomFound && !customHost) {
+        try {
+          const scanRes = await fetch('/api/lan/scan');
+          if (scanRes.ok) {
+            const scanData = await scanRes.json();
+            if (scanData.discovered && scanData.discovered.length > 0) {
+              for (const hostItem of scanData.discovered) {
+                if (hostItem.rooms && hostItem.rooms.some(r => r.code === cleanCode)) {
+                  // Found the room on this LAN host!
+                  const targetUrl = hostItem.url.replace(/\/$/, '');
+                  const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`);
+                  if (remoteRes.ok) {
+                    const remoteData = await remoteRes.json();
+                    if (remoteData.room) {
+                      roomFound = remoteData.room;
+                      setCustomServerHost(targetUrl);
+                      localStorage.setItem('whiteboard_custom_server', targetUrl);
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (scanErr) {
+          console.warn('[Auto LAN Discovery note]:', scanErr);
+        }
+      }
+
+      if (!roomFound) {
+        throw new Error(`Room "${cleanCode}" was not found. Please verify the 4-letter code and ensure both devices are connected to the exact same Wi-Fi / Hotspot.`);
+      }
+
       if (customHost !== null && customHost !== undefined) {
         setCustomServerHost(customHost);
         localStorage.setItem('whiteboard_custom_server', customHost);
       }
-      const baseUrl = hostToUse
-        ? (hostToUse.startsWith('http') ? hostToUse : `http://${hostToUse}`).replace(/\/$/, '')
-        : '';
-      const res = await fetch(`${baseUrl}/api/rooms/${code}`);
-      const data = await res.json();
-      if (!res.ok || !data.room) throw new Error(data.error || 'Room not found');
 
-      handleOpenBoard({ room: data.room, isOffline: false });
+      handleOpenBoard({ room: roomFound, isOffline: false });
     } catch (err) {
       alert(`Could not join room: ${err.message}`);
     }

@@ -82,6 +82,11 @@ export default function Hub({
   useEffect(() => {
     fetchRooms();
     loadPersonalBoards();
+    handleScanLan(true); // Silent scan on mount
+    const timer = setInterval(() => {
+      handleScanLan(true); // Silent background auto-discovery
+    }, 8000);
+    return () => clearInterval(timer);
   }, [user]);
 
   const fetchRooms = async () => {
@@ -236,22 +241,21 @@ export default function Hub({
     }
   };
 
-  const handleScanLan = async () => {
-    setIsScanningLan(true);
-    setDiscoveredLanRooms([]);
+  const handleScanLan = async (silent = false) => {
+    if (!silent) setIsScanningLan(true);
     try {
       const res = await fetch('/api/lan/scan');
       const data = await res.json();
       if (data.success && data.discovered) {
         setDiscoveredLanRooms(data.discovered);
-        if (data.discovered.length === 0) {
+        if (!silent && data.discovered.length === 0) {
           alert('No other active whiteboard sessions discovered on your local network yet.\n\nMake sure your partner has clicked "2. Without Internet" and both devices are connected to the exact same Wi-Fi or Mobile Hotspot.');
         }
       }
     } catch (err) {
-      alert('Could not scan LAN: ' + err.message);
+      if (!silent) alert('Could not scan LAN: ' + err.message);
     } finally {
-      setIsScanningLan(false);
+      if (!silent) setIsScanningLan(false);
     }
   };
 

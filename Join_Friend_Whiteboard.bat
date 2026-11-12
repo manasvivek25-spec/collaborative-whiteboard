@@ -33,3 +33,4 @@ if exist "%~dp0Collaborative_Whiteboard.exe" (
     start "" "%HOST_URL%"
 )
 exit /b 0
+

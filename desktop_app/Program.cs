@@ -18,6 +18,8 @@ namespace CollaborativeWhiteboard
             Application.SetCompatibleTextRenderingDefault(false);
 
             string appDir = AppDomain.CurrentDomain.BaseDirectory;
+            string bundledNode = Path.Combine(appDir, @"runtime\node.exe");
+            bool hasBundledNode = File.Exists(bundledNode);
             string serverScript = Path.Combine(appDir, @"web_whiteboard\server\server.js");
             string serverModules = Path.Combine(appDir, @"web_whiteboard\server\node_modules");
             string distIndex = Path.Combine(appDir, @"web_whiteboard\client\dist\index.html");
@@ -47,13 +49,13 @@ namespace CollaborativeWhiteboard
                 return;
             }
 
-            // Check if Node.js is installed
-            if (!IsNodeInstalled())
+            // Check if Node.js is available (bundled runtime or system node)
+            if (!hasBundledNode && !IsNodeInstalled())
             {
                 DialogResult dr = MessageBox.Show(
-                    "Node.js is required to host the Collaborative Whiteboard server on this machine.\n\n" +
-                    "• If you want to HOST sessions: Please install Node.js from https://nodejs.org\n" +
-                    "• If you are JOINING a friend's session: Connect to their LAN IP instead of localhost.\n\n" +
+                    "Node.js runtime was not found on this computer.\n\n" +
+                    "• To HOST sessions: Please install Node.js from https://nodejs.org\n" +
+                    "• To JOIN a partner's session: Connect to their LAN IP instead of localhost.\n\n" +
                     "Would you like to enter a friend's Host IP address to join their whiteboard now?",
                     "Collaborative Whiteboard",
                     MessageBoxButtons.YesNo,
@@ -71,7 +73,7 @@ namespace CollaborativeWhiteboard
             if (!Directory.Exists(serverModules))
             {
                 DialogResult dr = MessageBox.Show(
-                    "Project dependencies are not installed yet.\n\n" +
+                    "Server dependencies are not installed yet.\n\n" +
                     "Would you like to run 'install_dependencies.bat' now to install required packages?",
                     "Collaborative Whiteboard - Setup Required",
                     MessageBoxButtons.YesNo,
@@ -118,13 +120,13 @@ namespace CollaborativeWhiteboard
 
             if (!alreadyRunning)
             {
-                // Start Node.js server silently
+                // Start Node.js server silently using bundled node runtime if available
                 try
                 {
                     ProcessStartInfo serverPsi = new ProcessStartInfo
                     {
-                        FileName = "cmd.exe",
-                        Arguments = "/c node server.js",
+                        FileName = hasBundledNode ? bundledNode : "cmd.exe",
+                        Arguments = hasBundledNode ? "server.js" : "/c node server.js",
                         WorkingDirectory = Path.Combine(appDir, @"web_whiteboard\server"),
                         WindowStyle = ProcessWindowStyle.Hidden,
                         CreateNoWindow = true,
