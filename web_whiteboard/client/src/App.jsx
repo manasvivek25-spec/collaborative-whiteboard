@@ -25,6 +25,33 @@ export default function App() {
 
   const wsRef = useRef(null);
 
+  // Auto-route on direct URL query params (?room=CODE or ?offline=true)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    const offlineParam = params.get('offline');
+    if (offlineParam) {
+      const defaultUser = user || { user_code: 'U_DEMO', name: 'Manas Vivek', avatar_color: '#3b82f6' };
+      if (!user) {
+        setUser(defaultUser);
+        try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
+      }
+      setIsAccountModalOpen(false);
+      handleOpenBoard({
+        room: { code: 'OFFLINE', title: 'Personal Offline Workspace' },
+        isOffline: true
+      });
+    } else if (roomParam) {
+      const defaultUser = user || { user_code: 'USR-E9PG', name: 'Manas Vivek (Host)', avatar_color: '#3b82f6' };
+      if (!user) {
+        setUser(defaultUser);
+        try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
+      }
+      setIsAccountModalOpen(false);
+      handleJoinDirect(roomParam);
+    }
+  }, []);
+
   // ── WEBSOCKET CONNECTION & USER PRESENCE ───────────────────────────
   useEffect(() => {
     if (!user?.user_code) return;
