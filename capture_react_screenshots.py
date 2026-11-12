@@ -35,3 +35,4 @@ for filename, url in targets:
         print(f"  [FAILED] {out_file} not found. Stderr: {res.stderr}")
 
 print("All React screenshots captured successfully!")
+
