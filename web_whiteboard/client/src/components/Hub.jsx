@@ -393,9 +393,26 @@ export default function Hub({
             {/* Section 1: 3 Hosting Options */}
             <div className="bg-white border-2 border-slate-900 rounded-2xl p-6 shadow-sm">
               <h2 className="text-base font-bold text-slate-900">Create Group Whiteboard</h2>
-              <p className="text-xs text-slate-500 mt-0.5 mb-5">
+              <p className="text-xs text-slate-500 mt-0.5 mb-4">
                 Choose your network connection mode to host a collaborative session:
               </p>
+
+              {netInfo?.primary_ip && (
+                <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2.5 text-emerald-950 font-medium">
+                    <span className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-sm"><Wifi className="w-4 h-4" /></span>
+                    <div>
+                      <p className="font-bold text-emerald-900">Your LAN / Wi-Fi Address for Partners:</p>
+                      <p className="font-mono text-emerald-700 font-bold text-sm tracking-wide">http://{netInfo.primary_ip}:5000</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">
+                      Share this URL with friends on the same Wi-Fi (Do NOT use 'localhost')
+                    </span>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Option 1: Cloud & Internet Mode */}

@@ -12,14 +12,27 @@ namespace CollaborativeWhiteboard
         private static Process serverProcess = null;
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
             string appDir = AppDomain.CurrentDomain.BaseDirectory;
             string serverScript = Path.Combine(appDir, @"web_whiteboard\server\server.js");
+            string serverModules = Path.Combine(appDir, @"web_whiteboard\server\node_modules");
             string distIndex = Path.Combine(appDir, @"web_whiteboard\client\dist\index.html");
+
+            // If a custom remote host is passed via command-line (e.g., Collaborative_Whiteboard.exe 10.36.112.55:5000)
+            if (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
+            {
+                string targetHost = args[0].Trim();
+                if (!targetHost.StartsWith("http://") && !targetHost.StartsWith("https://"))
+                {
+                    targetHost = "http://" + targetHost;
+                }
+                LaunchAppWindow(targetHost);
+                return;
+            }
 
             // Check if server.js exists
             if (!File.Exists(serverScript))
@@ -37,13 +50,46 @@ namespace CollaborativeWhiteboard
             // Check if Node.js is installed
             if (!IsNodeInstalled())
             {
-                MessageBox.Show(
-                    "Node.js is required to run the Collaborative Whiteboard desktop application.\n\n" +
-                    "Please install Node.js (LTS version) from https://nodejs.org and relaunch the app.",
-                    "Collaborative Whiteboard - Dependency Required",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning
+                DialogResult dr = MessageBox.Show(
+                    "Node.js is required to host the Collaborative Whiteboard server on this machine.\n\n" +
+                    "• If you want to HOST sessions: Please install Node.js from https://nodejs.org\n" +
+                    "• If you are JOINING a friend's session: Connect to their LAN IP instead of localhost.\n\n" +
+                    "Would you like to enter a friend's Host IP address to join their whiteboard now?",
+                    "Collaborative Whiteboard",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
                 );
+
+                if (dr == DialogResult.Yes)
+                {
+                    PromptAndJoinRemote();
+                }
+                return;
+            }
+
+            // Check if server dependencies exist
+            if (!Directory.Exists(serverModules))
+            {
+                DialogResult dr = MessageBox.Show(
+                    "Project dependencies are not installed yet.\n\n" +
+                    "Would you like to run 'install_dependencies.bat' now to install required packages?",
+                    "Collaborative Whiteboard - Setup Required",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information
+                );
+
+                if (dr == DialogResult.Yes)
+                {
+                    string setupScript = Path.Combine(appDir, "install_dependencies.bat");
+                    if (File.Exists(setupScript))
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = setupScript,
+                            WorkingDirectory = appDir
+                        });
+                    }
+                }
                 return;
             }
 
@@ -62,7 +108,7 @@ namespace CollaborativeWhiteboard
                         UseShellExecute = false
                     };
                     Process buildProc = Process.Start(buildPsi);
-                    buildProc.WaitForExit(30000);
+                    if (buildProc != null) buildProc.WaitForExit(30000);
                 }
                 catch { }
             }
@@ -99,6 +145,27 @@ namespace CollaborativeWhiteboard
                     Thread.Sleep(500);
                     attempts++;
                 }
+
+                // If server still failed to respond
+                if (!IsServerResponding("http://127.0.0.1:5000/api/network-info"))
+                {
+                    DialogResult dr = MessageBox.Show(
+                        "The local server on port 5000 did not respond.\n\n" +
+                        "• If you are HOSTING: Please verify port 5000 is free and run 'install_dependencies.bat'.\n" +
+                        "• If you are JOINING a friend's whiteboard: Do not connect to localhost! You must connect to your friend's LAN IP address.\n\n" +
+                        "Would you like to enter a friend's Host IP address to join?",
+                        "Collaborative Whiteboard - Connection Notice",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning
+                    );
+
+                    if (dr == DialogResult.Yes)
+                    {
+                        PromptAndJoinRemote();
+                    }
+                    CleanUp();
+                    return;
+                }
             }
 
             // Set up exit cleanup hook
@@ -109,6 +176,42 @@ namespace CollaborativeWhiteboard
 
             // Clean up when app window exits
             CleanUp();
+        }
+
+        private static void PromptAndJoinRemote()
+        {
+            Form prompt = new Form()
+            {
+                Width = 460,
+                Height = 180,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                Text = "Connect to Partner's Host IP",
+                StartPosition = FormStartPosition.CenterScreen,
+                MaximizeBox = false,
+                MinimizeBox = false
+            };
+
+            Label textLabel = new Label() { Left = 20, Top = 18, Text = "Enter your friend's Host IP (e.g. 10.36.112.55 or 192.168.1.15):", Width = 400 };
+            TextBox textBox = new TextBox() { Left = 20, Top = 45, Width = 400, Text = "10.36.112.55:5000" };
+            Button confirmation = new Button() { Text = "Connect to Whiteboard", Left = 240, Width = 180, Top = 85, DialogResult = DialogResult.OK };
+            prompt.Controls.Add(textBox);
+            prompt.Controls.Add(confirmation);
+            prompt.Controls.Add(textLabel);
+            prompt.AcceptButton = confirmation;
+
+            if (prompt.ShowDialog() == DialogResult.OK && !string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                string target = textBox.Text.Trim();
+                if (!target.StartsWith("http://") && !target.StartsWith("https://"))
+                {
+                    target = "http://" + target;
+                }
+                if (!target.Contains(":5000") && target.IndexOf(':', 7) == -1)
+                {
+                    target = target + ":5000";
+                }
+                LaunchAppWindow(target);
+            }
         }
 
         private static bool IsNodeInstalled()
