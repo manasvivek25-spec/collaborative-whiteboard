@@ -6,17 +6,26 @@ echo ===================================================
 echo   Creating Collaborative Whiteboard Desktop Shortcut
 echo ===================================================
 
-set "TARGET=%~dp0Collaborative_Whiteboard.vbs"
+if exist "%~dp0Collaborative_Whiteboard.exe" (
+    set "TARGET=%~dp0Collaborative_Whiteboard.exe"
+    set "ARGS="
+) else (
+    set "TARGET=wscript.exe"
+    set "ARGS=\"%~dp0Collaborative_Whiteboard.vbs\""
+)
+
 set "SHORTCUT=%USERPROFILE%\Desktop\Collaborative Whiteboard.lnk"
-set "ICON=%~dp0web_whiteboard\client\public\icon-192.png"
+set "ICON=%~dp0app.ico"
+if not exist "%ICON%" set "ICON=%~dp0web_whiteboard\client\public\icon-192.png"
 
 powershell -NoProfile -Command ^
   "$ws = New-Object -ComObject WScript.Shell; " ^
   "$s = $ws.CreateShortcut('%SHORTCUT%'); " ^
-  "$s.TargetPath = 'wscript.exe'; " ^
-  "$s.Arguments = '\"%TARGET%\"'; " ^
+  "$s.TargetPath = '%TARGET%'; " ^
+  "if ('%ARGS%' -ne '') { $s.Arguments = '%ARGS%'; }; " ^
   "$s.WorkingDirectory = '%~dp0'; " ^
-  "$s.Description = 'Collaborative Whiteboard - Real-Time Offline and LAN Workspace'; " ^
+  "if (Test-Path '%ICON%') { $s.IconLocation = '%ICON%,0'; }; " ^
+  "$s.Description = 'Collaborative Whiteboard - Real-Time Offline and LAN Workspace (React + Node.js)'; " ^
   "$s.Save()"
 
 if exist "%SHORTCUT%" (
@@ -27,9 +36,8 @@ if exist "%SHORTCUT%" (
     echo You and your partners can now launch the Whiteboard directly from your Windows Desktop!
 ) else (
     echo.
-    echo [!] Could not create desktop shortcut automatically. You can right-click Collaborative_Whiteboard.vbs and choose "Send to -> Desktop (create shortcut)".
+    echo [!] Could not create desktop shortcut automatically. You can right-click Collaborative_Whiteboard.exe and choose "Send to -> Desktop (create shortcut)".
 )
 
 echo.
 pause
-

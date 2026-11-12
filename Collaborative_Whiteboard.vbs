@@ -1,4 +1,4 @@
-' Collaborative Whiteboard - Silent Native System App Launcher
+' Collaborative Whiteboard - Silent Native Desktop App Launcher
 ' Starts the background server silently (no black console window) and opens the standalone app window.
 
 Set objShell = CreateObject("WScript.Shell")
@@ -20,7 +20,7 @@ On Error GoTo 0
 strDistPath = strCurrentDir & "\web_whiteboard\client\dist\index.html"
 If Not objFSO.FileExists(strDistPath) Then
     objShell.CurrentDirectory = strCurrentDir & "\web_whiteboard\client"
-    objShell.Run "cmd /c npm run build", 1, True
+    objShell.Run "cmd /c npm run build", 0, True
 End If
 
 ' Start the Node.js server silently (window style 0 = hidden)
@@ -48,35 +48,22 @@ Else
     WScript.Quit
 End If
 
-' Launch as Standalone System App Window (Frameless / borderless native window without URL bar)
-' First check if Electron is available and installed
-strElectronPath = strCurrentDir & "\web_whiteboard\node_modules\.bin\electron.cmd"
-bLaunchedElectron = False
+' Launch as Standalone Desktop App Window (Frameless / borderless native window without URL bar)
+strEdgePath = objShell.ExpandEnvironmentStrings("%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe")
+strEdgePath64 = objShell.ExpandEnvironmentStrings("%ProgramFiles%\Microsoft\Edge\Application\msedge.exe")
+strChromePath = objShell.ExpandEnvironmentStrings("%ProgramFiles%\Google\Chrome\Application\chrome.exe")
+strChromePath32 = objShell.ExpandEnvironmentStrings("%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe")
+strAppProfile = objShell.ExpandEnvironmentStrings("%TEMP%\CollaborativeWhiteboardAppProfile")
 
-If objFSO.FileExists(strElectronPath) Then
-    On Error Resume Next
-    objShell.CurrentDirectory = strCurrentDir & "\web_whiteboard"
-    objShell.Run "cmd /c npx electron electron/main.cjs", 0, False
-    If Err.Number = 0 Then
-        bLaunchedElectron = True
-    End If
-    On Error GoTo 0
-End If
-
-If Not bLaunchedElectron Then
-    ' Use Windows Native App Mode (msedge or chrome --app=)
-    strEdgePath = objShell.ExpandEnvironmentStrings("%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe")
-    strChromePath = objShell.ExpandEnvironmentStrings("%ProgramFiles%\Google\Chrome\Application\chrome.exe")
-    strChromePath32 = objShell.ExpandEnvironmentStrings("%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe")
-
-    If objFSO.FileExists(strEdgePath) Then
-        objShell.Run """" & strEdgePath & """ --app=http://localhost:5000 --window-size=1280,820", 1, False
-    ElseIf objFSO.FileExists(strChromePath) Then
-        objShell.Run """" & strChromePath & """ --app=http://localhost:5000 --window-size=1280,820", 1, False
-    ElseIf objFSO.FileExists(strChromePath32) Then
-        objShell.Run """" & strChromePath32 & """ --app=http://localhost:5000 --window-size=1280,820", 1, False
-    Else
-        ' Fallback to default browser
-        objShell.Run "http://localhost:5000", 1, False
-    End If
+If objFSO.FileExists(strEdgePath) Then
+    objShell.Run """" & strEdgePath & """ --app=http://localhost:5000 --window-size=1360,860 --user-data-dir=""" & strAppProfile & """", 1, False
+ElseIf objFSO.FileExists(strEdgePath64) Then
+    objShell.Run """" & strEdgePath64 & """ --app=http://localhost:5000 --window-size=1360,860 --user-data-dir=""" & strAppProfile & """", 1, False
+ElseIf objFSO.FileExists(strChromePath) Then
+    objShell.Run """" & strChromePath & """ --app=http://localhost:5000 --window-size=1360,860 --user-data-dir=""" & strAppProfile & """", 1, False
+ElseIf objFSO.FileExists(strChromePath32) Then
+    objShell.Run """" & strChromePath32 & """ --app=http://localhost:5000 --window-size=1360,860 --user-data-dir=""" & strAppProfile & """", 1, False
+Else
+    ' Fallback to default browser
+    objShell.Run "http://localhost:5000", 1, False
 End If

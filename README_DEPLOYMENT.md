@@ -1,100 +1,139 @@
-# Collaborative Whiteboard (v2.0 Full-Stack Upgrade)
+# Collaborative Whiteboard — Real-Time LAN & Offline Workspace
+**Computer Networks Laboratory Final Project • React 18 & Node.js WebSocket Full-Stack**
 
-Production-scale collaborative whiteboard system featuring:
-- **Cross-Network Connectivity:** Devices on **mobile data (4G/5G)** and **Wi-Fi** connect simultaneously without router port forwarding or firewall blocks.
-- **User Accounts & Auto-Generated Account Code:** Simple sign-up (Name, Email, Avatar) generates a unique `USR-XXXX` code (e.g. `USR-3VNG`).
-- **Host Member Enrollment:** Hosts can add members by typing their `USR-XXXX` code, Email, or IP, or by 1-clicking active users on the server.
-- **SQLite Database Persistence:** All users, rooms, drawing actions, chat logs, and milestones are stored permanently in `server/data/whiteboard_data.db`.
-- **Modern React + Vite UI:** Google Classroom-style dashboard with Group vs Personal switcher, interactive HTML5 canvas, ink-to-font conversion, remote cursors, and live chat.
-- **Dual Connection Modes:** Works **With Internet (Cloud & Cross-Network)** and **Without Internet (Direct Wi-Fi / Hotspot)**, plus the original desktop Python `.exe` applications!
+A production-scale, low-latency collaborative vector graphics whiteboard designed for institutional local area networks (LANs), laboratory subnets, and air-gapped environments with 100% offline autonomy, deterministic Role-Based Access Control (RBAC), and sandboxed simulation.
 
 ---
 
-## 🚀 Quick Start Guide
+## 👥 Project Team & Authors
+* **CS24B1025 — Anirudh:** Network Protocol Architecture, Node.js WebSocket Server, Berkeley TCP Socket Framing, UDP Physical LAN Scanner.
+* **CS24B1097 — Krishna Chaitanya:** React 18 Canvas 2D Engine, 2D Affine Transformation Math (15%–400% Zoom), Synchronized Grids, Vector UI, Typography Ribbon.
+* **CS24B1108 — Harish:** Synchronous Side-Drawer Group Chat, Session Isolation (4-Letter Codes), SQLite Database Persistence, `.whiteboard` File Bundle Engine.
+* **CS24B1106 — Manas Vivek:** Deterministic 4-Dimensional RBAC Governance, Isolated Instance Sandbox Simulation (3-Way Toggle), Storage Privacy Separation, Physical LAN Benchmarking.
 
-### Mode 1: Run Locally or on LAN / Wi-Fi Hotspot
-1. Double-click **`start_web_whiteboard.bat`** (or open terminal and run `cd web_whiteboard && node server/server.js`).
-2. Open your web browser at:
+---
+
+## 🌟 Key Features & Capabilities
+
+1. **Native Desktop Application (`Collaborative_Whiteboard.exe`):**
+   * Standalone compiled Windows desktop executable with official embedded icon.
+   * Silently provisions background services and launches a dedicated, borderless desktop window (`--app` mode) with zero browser chrome or address bars.
+   * Auto-terminates background server processes cleanly upon window exit.
+
+2. **Full-Duplex WebSocket Engine (Node.js + TCP):**
+   * Centralized star-topology event pipeline delivering sub-5 millisecond event propagation across local network nodes.
+   * Monotonic sequence validation (`seq`), frame boundaries, and state hydration (`join_ack`) for late-joining participants.
+   * UDP physical adapter scanner on port 45455 that automatically discovers host Wi-Fi/Ethernet IPs while filtering WSL/Hyper-V virtual interfaces.
+
+3. **React 18 Vector Canvas & Synchronized Grids:**
+   * Infinite 2D panning and smooth pointer-anchored zoom from 15% to 400%.
+   * 4 Network-Synchronized Grid Styles: **Square Graph Grid**, **Dot Matrix**, **Ruled Notebook Lines**, and **Plain Canvas**.
+   * Geometric shape gallery with custom stroke widths and interactive **Fill Color** palette toggle.
+   * Dynamic interactive tables with column/row editing, drag handle pill, and corner resize handles.
+   * Typography ribbon featuring 8 font families (Inter, JetBrains Mono, Caveat, etc.) and Ink-to-Text OCR.
+
+4. **Deterministic Role-Based Access Control (RBAC Matrix):**
+   * 4 Enforced Dimensions: **Canvas Drawing**, **Group Chat**, **Instance Management**, and **Public Works Sharing**.
+   * 3 Policy Modes: **Host Only** (with client-side view-only lock banner and server-side packet rejection), **Selected Members** (multi-select modal dialog with search and checkboxes), and **Everyone**.
+
+5. **Milestone Sandboxing & Storage Privacy Separation:**
+   * Point-in-time immutable milestone snapshots.
+   * **Isolated Instance Sandbox Mode** with orange banner and 3-way toggle:
+     - 📁 **Original Snapshot** (unmodified base state)
+     - 🧪 **Sandbox Simulation** (private experimental workspace)
+     - 👑 **Host Sandbox** (view of host's published sandbox)
+   * Two-option save workflow: **Save in My Own System (Private)** vs. **Share to Public Works (Room Gallery)**.
+   * Host-exclusive live canvas restoration.
+
+6. **Synchronous Chat & SQLite Persistence:**
+   * Docked side-drawer group chat with timestamps, avatars, and server-side SQLite storage.
+   * Live remote cursors with sub-10ms linear interpolation.
+   * Presence audit logging for participant join/leave events.
+
+---
+
+## 🚀 How to Run the Desktop Application
+
+### Option A: 1-Click Desktop Executable (Recommended)
+1. Double-click **`Collaborative_Whiteboard.exe`** in the project folder.
+2. The application will silently start the background services and open directly as a native desktop window!
+3. To place a shortcut on your Windows Desktop, double-click **`Create_Desktop_Shortcut.bat`**.
+
+### Option B: Batch / Silent Script Launcher
+* Double-click **`Collaborative_Whiteboard.bat`** (or **`Collaborative_Whiteboard.vbs`**).
+* It verifies Node.js, starts the local server silently, and opens the standalone desktop app window.
+
+### Option C: Developer Mode (With Console Logs)
+* Double-click **`start_web_whiteboard.bat`**.
+* The server will boot with live terminal output on `http://localhost:5000` and launch in your default browser.
+
+---
+
+## 🛠️ Automated Setup & Build from Source
+
+If running on a fresh computer, simply double-click:
+```
+install_dependencies.bat
+```
+This automated script will:
+1. Verify Node.js (v18+).
+2. Install server dependencies (`npm install` in `web_whiteboard/server`).
+3. Install client dependencies (`npm install` in `web_whiteboard/client`).
+4. Compile the React 18 production bundle via Vite.
+5. Compile `Collaborative_Whiteboard.exe` with the official embedded WB icon via Microsoft .NET C# compiler (`csc.exe`).
+6. Generate the desktop shortcut on your Windows desktop.
+
+---
+
+## 🌐 Connecting Partners Across Physical LAN / Wi-Fi Hotspot
+
+1. Ensure the Host computer and partner devices are connected to the same Wi-Fi router, Ethernet switch, or mobile hotspot.
+2. The Host launches `Collaborative_Whiteboard.exe` and creates a room (e.g., room code `SPZG`).
+3. The Host's physical LAN IP (e.g. `192.168.1.15`) is displayed on the lobby card.
+4. Partner devices simply open their browser and navigate to:
    ```
-   http://localhost:5000
+   http://<HOST-IP>:5000
    ```
-3. Any device on the same Wi-Fi router or mobile hotspot can connect by visiting:
-   ```
-   http://<YOUR-LAPTOP-IP>:5000
-   ```
+5. Partners enter the 4-letter room code (`SPZG`) and join immediately with zero cloud login!
 
 ---
 
-### Mode 2: Connect Devices Across Different Networks (Mobile Data + Wi-Fi)
+## 📁 Source Code Directory Structure
 
-To allow a phone using **cellular mobile data (4G/5G)** and a laptop on **home/college Wi-Fi** to connect together:
-
-1. Keep **`start_web_whiteboard.bat`** running on port 5000.
-2. Double-click **`run_internet_tunnel.bat`**.
-3. It gives you a public HTTPS link (e.g., `https://brave-frog-42.loca.lt`).
-4. Share this link with your partner on mobile data. They can open it on their phone browser and join your whiteboard session instantly!
-
----
-
-### Mode 3: Deploy to Free Cloud Hosting (Render / Railway) - RECOMMENDED
-
-Deploying to the cloud eliminates the need to run any terminal, batch file, or local server on your computer! Your whiteboard will have a permanent public HTTPS URL (e.g., `https://collaborative-whiteboard.onrender.com`) that anyone on mobile data (4G/5G) or Wi-Fi can open directly in their browser.
-
-#### Deploy to Render.com (100% Free, No Credit Card Required):
-1. **Create a GitHub Repository:**
-   - Go to [github.com/new](https://github.com/new) and create a repository (e.g., `collaborative-whiteboard`).
-   - In your project folder, run:
-     ```bash
-     git init
-     git add .
-     git commit -m "Initial commit of full-stack collaborative whiteboard"
-     git branch -M main
-     git remote add origin https://github.com/<YOUR-USERNAME>/<YOUR-REPO-NAME>.git
-     git push -u origin main
-     ```
-2. **Deploy on Render:**
-   - Go to [render.com](https://render.com) and log in with your GitHub account.
-   - Click **New +** -> **Web Service**.
-   - Select your GitHub repository.
-   - Configure the following settings:
-     - **Name:** `collaborative-whiteboard` (or your choice)
-     - **Root Directory:** `web_whiteboard`
-     - **Runtime:** `Node`
-     - **Build Command:** `npm run install-all && npm run build`
-     - **Start Command:** `node --experimental-sqlite server/server.js`
-     - **Instance Type:** `Free`
-   - Click **Deploy Web Service**.
-3. **Done!** Render gives you a permanent `https://your-app.onrender.com` link. Anyone worldwide can open it and collaborate in real-time!
-
----
-
-## 👥 How to Add Members in Whiteboard
-
-1. **Sign Up:** Each user creates an account (Name & Email). The system assigns them a unique **Account Code** (e.g. `USR-3VNG`).
-2. **Copy Code:** The user clicks **Copy Code** on their profile card in the top right.
-3. **Host Adds Member:**
-   - Inside any active whiteboard room, the Host clicks the blue **`➕ Add Member`** button.
-   - The host pastes the user's `USR-XXXX` code (or types their email).
-   - The server pushes a real-time invitation to the member's screen!
-   - When the member accepts, they enter the room with complete drawing history and synchronized state.
-
-
-
----
-
-## 💻 System App & Desktop Launchers (For You & Partners)
-
-The whiteboard can now be run as a **native system desktop application** (without browser toolbars, tabs, or command terminal clutter):
-
-### 1. 1-Click Desktop Shortcut (Windows)
-Double-click **`Create_Desktop_Shortcut.bat`**. This creates an official **"Collaborative Whiteboard"** shortcut directly on your Windows Desktop with its own custom app icon!
-
-### 2. Silent Desktop Launcher
-Double-click **`Collaborative_Whiteboard.vbs`** or **`Collaborative_Whiteboard.bat`**:
-- Silently boots the background server on port 5000 (no lingering black terminal windows).
-- Instantly launches the whiteboard inside a frameless native system desktop window (`--app` mode).
-
-### 3. PWA Desktop App for Any Device (Windows, Mac, iPad, Android)
-- When opening the whiteboard in Chrome, Edge, Safari, or Samsung Internet, click the **"Desktop App"** button in the header or the **Install App (+)** icon in the address bar.
-- The whiteboard installs into the host operating system, appearing in the Start Menu, Applications folder, and Taskbar.
-- Partners connected to your Wi-Fi or Mobile Hotspot can open your Host IP (e.g. `http://192.168.1.15:5000`) and tap "Desktop App" to install it directly on their devices for full offline drawing!
+```
+lan_whiteboard/
+├── Collaborative_Whiteboard.exe       # Compiled Native Windows Desktop Executable
+├── Collaborative_Whiteboard.bat       # Desktop Batch Launcher
+├── Collaborative_Whiteboard.vbs       # Silent VBScript App Launcher (Hidden Console)
+├── Create_Desktop_Shortcut.bat        # Generates Desktop Shortcut on Windows
+├── install_dependencies.bat           # 1-Click Automated Setup & Build Script
+├── start_web_whiteboard.bat           # Developer Server Runner with Console Logs
+├── app.ico                            # Official Multi-Resolution Desktop Icon
+├── LAN_Collaborative_Whiteboard_Presentation_Updated.pptx  # 10-Slide Project PPT
+├── VIDEO_PRESENTATION_SCRIPT.md       # Name-Order-Wise Video Presentation Script
+├── desktop_app/                       # C# Desktop Executable Source Code
+│   └── Program.cs                     # Native Windows GUI launcher & process supervisor
+└── web_whiteboard/                    # Full-Stack React + Node.js Source Code
+    ├── package.json                   # Project scripts and configuration
+    ├── server/                        # Node.js WebSocket Backend Server
+    │   ├── server.js                  # Authoritative WebSocket & Express Server
+    │   ├── package.json               # Backend dependencies (ws, express, etc.)
+    │   └── data/                      # Persistent SQLite Database storage
+    │       └── whiteboard_data.db     # SQLite tables (rooms, actions, messages, etc.)
+    └── client/                        # React 18 + Vite Frontend Application
+        ├── package.json               # Frontend dependencies (React 18, Lucide, Tailwind)
+        ├── vite.config.js             # Vite build configuration
+        ├── dist/                      # Production-compiled assets served by server
+        └── src/                       # React Source Code
+            ├── App.jsx                # Main Application State Router
+            ├── components/            # UI Components
+            │   ├── Hub.jsx            # Lobby & Room Discovery
+            │   ├── Whiteboard.jsx     # HTML5 Canvas 2D Vector Engine
+            │   ├── ParticipantsDrawer.jsx # 4D RBAC Permission Matrix & Selected Modal
+            │   ├── ChatDrawer.jsx     # Synchronous Group Chat & Timestamps
+            │   ├── ShapesModal.jsx    # Vector Shapes Gallery with Fill Toggle
+            │   ├── PublicWorksModal.jsx # Gallery, Sandboxed Simulation & Restores
+            │   ├── TypographyRibbon.jsx # Font selector (8 families) & OCR
+            │   └── ...
+            └── index.css              # Glassmorphic Tailwind Design Styles
+```

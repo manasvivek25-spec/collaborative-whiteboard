@@ -2,23 +2,18 @@
   "name": "collaborative-whiteboard-app",
   "version": "2.0.0",
   "type": "module",
-  "description": "Production-scale Real-Time Collaborative Whiteboard with Cross-Network, React+Vite, and SQLite",
+  "description": "Production-scale Real-Time Collaborative Whiteboard with React 18, WebSockets, Canvas 2D, and SQLite",
   "scripts": {
     "install:server": "cd server && npm install",
     "install:client": "cd client && npm install",
     "install-all": "npm run install:server && npm run install:client",
     "build": "cd client && npm run build",
     "start": "cd server && node server.js",
-    "electron": "electron electron/main.cjs",
-    "app": "npm run build && electron electron/main.cjs",
     "dev:server": "cd server && node server.js",
     "dev:client": "cd client && npm run dev",
     "dev": "npm run start"
   },
   "engines": {
-    "node": ">=22.0.0"
-  },
-  "devDependencies": {
-    "electron": "^45.2.3"
+    "node": ">=18.0.0"
   }
 }
