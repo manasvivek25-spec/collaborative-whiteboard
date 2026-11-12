@@ -307,7 +307,6 @@ export default function Hub({
           <div>
             <h1 className="font-extrabold text-base text-slate-900 tracking-tight flex items-center gap-2">
               Whiteboard Logs & Workspace
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full">v2.0</span>
             </h1>
             <p className="text-[11px] text-slate-500">Cross-Network &bull; Mobile &bull; Wi-Fi &bull; LAN</p>
           </div>
