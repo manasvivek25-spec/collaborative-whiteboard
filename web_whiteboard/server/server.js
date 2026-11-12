@@ -548,11 +548,11 @@ function handleWsMessage(ws, msg) {
       }
       roomMap.get(userCode).add(ws);
 
-      // Fetch snapshot data
+      // Fetch snapshot data (public items + only this user's private items)
       const actions = db.getRoomActions(roomCode);
       const chat = db.getChatHistory(roomCode);
-      const milestones = db.getRoomMilestones(roomCode);
-      const publicWorks = db.getPublicWorks(roomCode);
+      const milestones = db.getRoomMilestones(roomCode, userCode);
+      const publicWorks = db.getPublicWorks(roomCode, userCode);
 
       // Send join acknowledgment & state snapshot
       ws.send(JSON.stringify({
@@ -764,58 +764,97 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 10. Save Canvas Milestone / Instance
-    case 'save_milestone': {
+    // 9.1 Synchronize Canvas Grid Style Across All Clients
+    case 'set_grid_style': {
       if (!meta.room_code) return;
       const { perms } = getMemberPermissions(meta.room_code, meta.user_code);
-      if (!perms.can_instances) {
+      if (!perms.can_draw) {
         return ws.send(JSON.stringify({
           type: 'error',
-          text: 'Managing instances is disabled for you by the host.'
+          text: 'Only the host or permitted members can change the room grid style.'
         }));
       }
 
+      const gridStyle = msg.grid_style || 'square';
+      db.updateRoomGridStyle(meta.room_code, gridStyle);
+
+      broadcastToRoom(meta.room_code, {
+        type: 'grid_style_updated',
+        grid_style: gridStyle,
+        updated_by: meta.user_name
+      });
+      break;
+    }
+
+    // 10. Save Canvas Milestone / Instance (Supports Private System vs Public Works)
+    case 'save_milestone': {
+      if (!meta.room_code) return;
+      const { isHost, perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      const isPublic = msg.is_public !== false && msg.is_public !== 0;
+
+      // Anyone can save privately in their own system; but sharing to public works requires permission
+      if (isPublic && !isHost && !perms.can_instances) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Sharing instances to public works is disabled for you by the host.'
+        }));
+      }
+
+      const snap = msg.snapshot || db.getRoomActions(meta.room_code);
       const milestone = {
         id: `ms_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         title: msg.title || 'Saved Milestone',
         author_code: meta.user_code,
         author_name: meta.user_name,
-        snapshot: msg.snapshot || db.getRoomActions(meta.room_code),
+        snapshot: snap,
+        original_snapshot_json: snap,
+        host_sandbox_json: snap,
+        is_public: isPublic ? 1 : 0,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
       db.saveMilestone(meta.room_code, milestone);
 
-      broadcastToRoom(meta.room_code, {
-        type: 'new_milestone',
-        milestone
-      });
+      if (isPublic) {
+        // Broadcast to public space
+        broadcastToRoom(meta.room_code, {
+          type: 'new_milestone',
+          milestone
+        });
 
-      // Post system announcement
-      const sysNotice = {
-        id: `sys_${Date.now()}`,
-        room_code: meta.room_code,
-        sender_code: 'system',
-        sender_name: 'System',
-        avatar_color: '#2563eb',
-        message: `📸 ${meta.user_name} saved instance: '${milestone.title}'`,
-        timestamp: milestone.timestamp,
-        is_system: true
-      };
-      db.saveChatMessage(meta.room_code, sysNotice);
-      broadcastToRoom(meta.room_code, { type: 'chat_message', ...sysNotice });
+        const sysNotice = {
+          id: `sys_${Date.now()}`,
+          room_code: meta.room_code,
+          sender_code: 'system',
+          sender_name: 'System',
+          avatar_color: '#2563eb',
+          message: `📸 ${meta.user_name} saved instance: '${milestone.title}' to Public Works`,
+          timestamp: milestone.timestamp,
+          is_system: true
+        };
+        db.saveChatMessage(meta.room_code, sysNotice);
+        broadcastToRoom(meta.room_code, { type: 'chat_message', ...sysNotice });
+      } else {
+        // Saved strictly to private system - deliver to this user's socket only
+        ws.send(JSON.stringify({
+          type: 'new_milestone',
+          milestone,
+          is_private: true
+        }));
+      }
       break;
     }
 
-    // 11. Restore Canvas Milestone (Host / Co-host restricted)
+    // 11. Restore Canvas Milestone (Strictly HOST only)
     case 'restore_milestone': {
       if (!meta.room_code) return;
-      const { isHost, me, perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
 
-      if (!isHost && me?.role !== 'cohost' && !perms.can_instances) {
+      if (!isHost) {
         return ws.send(JSON.stringify({
           type: 'error',
-          text: 'Restricted: Only the host or an assigned co-host can restore canvas instances.'
+          text: 'Restricted: Only the host has permission to restore canvas instances to the live whiteboard.'
         }));
       }
 
@@ -838,7 +877,7 @@ function handleWsMessage(ws, msg) {
         sender_code: 'system',
         sender_name: 'System',
         avatar_color: '#2563eb',
-        message: `🔄 Canvas restored to milestone '${msg.title}' by ${meta.user_name}.`,
+        message: `🔄 Canvas restored to milestone '${msg.title}' by Host ${meta.user_name}.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         is_system: true
       };
@@ -847,20 +886,42 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // Top-Level Matrix Permissions
+    // Top-Level Matrix Permissions (Host Only)
     case 'update_matrix_permissions': {
       if (!meta.room_code) return;
       const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code === meta.user_code;
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
       if (!isHost) {
         return ws.send(JSON.stringify({ type: 'error', text: 'Unauthorized: Host action only' }));
       }
 
-      db.updateRoomPermissions(meta.room_code, msg.permissions || {});
-      if (msg.permissions?.canva_perm === 'host_only') {
-        db.setAllMembersDrawingPermission(meta.room_code, 0);
-      } else if (msg.permissions?.canva_perm === 'everyone') {
-        db.setAllMembersDrawingPermission(meta.room_code, 1);
+      const { permissions, perm_key, selected_user_codes } = msg;
+
+      if (perm_key && selected_user_codes !== undefined) {
+        // Targeted Selected Members Dialog Box confirmation
+        db.setMatrixSelectedMembers(meta.room_code, perm_key, selected_user_codes);
+      } else if (permissions) {
+        db.updateRoomPermissions(meta.room_code, permissions);
+        if (permissions.canva_perm === 'host_only') {
+          db.setAllMembersDrawingPermission(meta.room_code, 0);
+        } else if (permissions.canva_perm === 'everyone') {
+          db.setAllMembersDrawingPermission(meta.room_code, 1);
+        }
+        if (permissions.chat_perm === 'host_only') {
+          db.setAllMembersChatPermission(meta.room_code, 0);
+        } else if (permissions.chat_perm === 'everyone') {
+          db.setAllMembersChatPermission(meta.room_code, 1);
+        }
+        if (permissions.instances_perm === 'host_only') {
+          db.setAllMembersInstancesPermission(meta.room_code, 0);
+        } else if (permissions.instances_perm === 'everyone') {
+          db.setAllMembersInstancesPermission(meta.room_code, 1);
+        }
+        if (permissions.public_work_perm === 'host_only') {
+          db.setAllMembersPublicWorkPermission(meta.room_code, 0);
+        } else if (permissions.public_work_perm === 'everyone') {
+          db.setAllMembersPublicWorkPermission(meta.room_code, 1);
+        }
       }
 
       const notice = {
@@ -1116,16 +1177,18 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 16. Save Public Work Screenshot
+    // 16. Save Public Work Screenshot (Local / Private vs Room Public Works)
     case 'save_public_work': {
       if (!meta.room_code) return;
       const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code === meta.user_code;
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
       const members = db.getRoomMembers(meta.room_code);
       const me = members.find(m => m.user_code === meta.user_code);
       const perms = computeUserPermissions(room, me, isHost);
+      const isPublic = msg.is_public !== false && msg.is_public !== 0;
 
-      if (!perms.can_public_work) {
+      // Saving privately is always allowed for anyone; publishing to public works requires permission
+      if (isPublic && !isHost && !perms.can_public_work) {
         return ws.send(JSON.stringify({
           type: 'error',
           text: 'Sharing to public works is currently restricted by the host.'
@@ -1138,33 +1201,54 @@ function handleWsMessage(ws, msg) {
         author_code: meta.user_code,
         author_name: meta.user_name,
         image_data: msg.image_data,
+        is_public: isPublic ? 1 : 0,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
       db.savePublicWork(meta.room_code, work);
-      broadcastToRoom(meta.room_code, {
-        type: 'new_public_work',
-        work
-      });
 
-      const sysNotice = {
-        id: `sys_pw_${Date.now()}`,
-        room_code: meta.room_code,
-        sender_code: 'system',
-        sender_name: 'System',
-        avatar_color: '#8b5cf6',
-        message: `🖼️ ${meta.user_name} published screenshot '${work.title}' to Public Works.`,
-        timestamp: work.timestamp,
-        is_system: true
-      };
-      db.saveChatMessage(meta.room_code, sysNotice);
-      broadcastToRoom(meta.room_code, { type: 'chat_message', ...sysNotice });
+      if (isPublic) {
+        broadcastToRoom(meta.room_code, {
+          type: 'new_public_work',
+          work
+        });
+
+        const sysNotice = {
+          id: `sys_pw_${Date.now()}`,
+          room_code: meta.room_code,
+          sender_code: 'system',
+          sender_name: 'System',
+          avatar_color: '#8b5cf6',
+          message: `🖼️ ${meta.user_name} published screenshot '${work.title}' to Public Works.`,
+          timestamp: work.timestamp,
+          is_system: true
+        };
+        db.saveChatMessage(meta.room_code, sysNotice);
+        broadcastToRoom(meta.room_code, { type: 'chat_message', ...sysNotice });
+      } else {
+        ws.send(JSON.stringify({
+          type: 'new_public_work',
+          work,
+          is_private: true
+        }));
+      }
       break;
     }
 
-    // 17. Delete Public Work Screenshot
+    // 17. Delete Public Work Screenshot (Host or Item Author)
     case 'delete_public_work': {
       if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+      
+      const existing = db.getPublicWorks(meta.room_code, meta.user_code).find(w => w.id === msg.id);
+      if (existing && existing.is_public && !isHost) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Restricted: Only the host has permission to delete public works.'
+        }));
+      }
+
       db.deletePublicWork(msg.id);
       broadcastToRoom(meta.room_code, {
         type: 'public_work_deleted',
@@ -1173,21 +1257,68 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 18. Update Instance Snapshot (Work in Instance Sandbox)
-    case 'update_instance_snapshot': {
+    // 17.1 Delete Milestone / Instance (Host or Author)
+    case 'delete_milestone': {
       if (!meta.room_code) return;
-      db.updateMilestoneSnapshot(msg.instance_id, msg.snapshot);
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+
+      const existing = db.getRoomMilestones(meta.room_code, meta.user_code).find(m => m.id === msg.id);
+      if (existing && existing.is_public && !isHost) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Restricted: Only the host has permission to delete public instances.'
+        }));
+      }
+
+      db.deleteMilestone(msg.id);
       broadcastToRoom(meta.room_code, {
-        type: 'instance_snapshot_updated',
-        instance_id: msg.instance_id,
-        snapshot: msg.snapshot
+        type: 'milestone_deleted',
+        id: msg.id
       });
       break;
     }
 
-    // 19. Broadcast Instance Show Mode to All Members
+    // 18. Update Instance Snapshot (Sandbox simulation)
+    case 'update_instance_snapshot': {
+      if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+
+      if (isHost) {
+        // Host sandbox updates the server instance so other members can view it
+        db.updateMilestoneHostSandbox(msg.instance_id, msg.snapshot);
+        broadcastToRoom(meta.room_code, {
+          type: 'instance_snapshot_updated',
+          instance_id: msg.instance_id,
+          snapshot: msg.snapshot,
+          host_sandbox: msg.snapshot
+        });
+      } else {
+        // Member sandboxes are kept private to their account
+        ws.send(JSON.stringify({
+          type: 'instance_snapshot_updated',
+          instance_id: msg.instance_id,
+          snapshot: msg.snapshot,
+          is_private: true
+        }));
+      }
+      break;
+    }
+
+    // 19. Broadcast Instance Show Mode to All Members (Strictly Host Only)
     case 'broadcast_instance_show': {
       if (!meta.room_code) return;
+      const room = db.getRoom(meta.room_code);
+      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+
+      if (!isHost) {
+        return ws.send(JSON.stringify({
+          type: 'error',
+          text: 'Restricted: Only the host can broadcast an instance sandbox onto everyone’s canvas.'
+        }));
+      }
+
       broadcastToRoom(meta.room_code, {
         type: 'show_instance_broadcast',
         instance_id: msg.instance_id,
@@ -1216,10 +1347,10 @@ function computeUserPermissions(room, member, isHost) {
   const instancesPerm = room?.instances_perm || 'everyone';
   const publicWorkPerm = room?.public_work_perm || 'everyone';
 
-  const memberCanDraw = member ? Boolean(member.can_draw !== 0 && member.can_draw !== false) : true;
-  const memberCanChat = member ? Boolean(member.can_chat !== 0 && member.can_chat !== false) : true;
-  const memberCanInstances = member ? Boolean(member.can_instances !== 0 && member.can_instances !== false) : true;
-  const memberCanPublicWork = member ? Boolean(member.can_public_work !== 0 && member.can_public_work !== false) : true;
+  const memberCanDraw = member ? Boolean(member.can_draw === 1 || member.can_draw === true) : false;
+  const memberCanChat = member ? Boolean(member.can_chat === 1 || member.can_chat === true) : false;
+  const memberCanInstances = member ? Boolean(member.can_instances === 1 || member.can_instances === true) : false;
+  const memberCanPublicWork = member ? Boolean(member.can_public_work === 1 || member.can_public_work === true) : false;
 
   return {
     can_draw: canvaPerm === 'everyone' ? true : (canvaPerm === 'host_only' ? false : memberCanDraw),
@@ -1232,9 +1363,10 @@ function computeUserPermissions(room, member, isHost) {
 
 function getMemberPermissions(roomCode, userCode) {
   const room = db.getRoom(roomCode);
-  const isHost = room?.host_user_code === userCode;
+  const uClean = (userCode || '').trim().toUpperCase();
+  const isHost = (room?.host_user_code || '').trim().toUpperCase() === uClean;
   const members = db.getRoomMembers(roomCode);
-  const me = members.find(m => m.user_code === userCode);
+  const me = members.find(m => (m.user_code || '').trim().toUpperCase() === uClean);
   return {
     isHost,
     room,

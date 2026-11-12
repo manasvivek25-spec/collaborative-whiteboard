@@ -27,9 +27,15 @@ export default function ShapesModal({
   isOpen,
   onClose,
   activeShape,
-  onSelectShape
+  onSelectShape,
+  fillShape = false,
+  setFillShape,
+  fillColor = '#3b82f6',
+  setFillColor
 }) {
   if (!isOpen) return null;
+
+  const FILL_COLORS = ['#3b82f6', '#ef4444', '#f97316', '#eab308', '#22c55e', '#8b5cf6', '#000000', '#ffffff'];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-fade-in">
@@ -50,6 +56,35 @@ export default function ShapesModal({
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Fill Shape Controls */}
+        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 mb-3 flex flex-col gap-2">
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
+            <input
+              type="checkbox"
+              checked={fillShape}
+              onChange={(e) => setFillShape && setFillShape(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <span>Fill Shape with Color</span>
+          </label>
+
+          {fillShape && (
+            <div className="flex items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-slate-500 font-semibold mr-1">Fill:</span>
+              {FILL_COLORS.map((col) => (
+                <button
+                  key={col}
+                  onClick={() => setFillColor && setFillColor(col)}
+                  style={{ backgroundColor: col }}
+                  className={`w-5 h-5 rounded-full border border-slate-300 transition ${
+                    fillColor === col ? 'ring-2 ring-blue-600 scale-110' : 'hover:scale-105'
+                  }`}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 my-2">

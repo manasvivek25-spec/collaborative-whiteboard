@@ -7,27 +7,39 @@ import {
   Maximize2,
   Clock,
   User,
-  ExternalLink,
-  Sparkles
+  HardDrive,
+  Globe,
+  Sparkles,
+  Lock
 } from 'lucide-react';
 
 export default function PublicWorksModal({
   isOpen,
   onClose,
   publicWorks = [],
+  privateWorks = [],
   currentUserCode = '',
   isHost = false,
   onDeleteWork,
   onOpenExportModal
 }) {
   const [selectedImage, setSelectedImage] = useState(null);
+  const [activeTab, setActiveTab] = useState('public'); // 'public' | 'private'
 
   if (!isOpen) return null;
+
+  const publicList = publicWorks.filter(w => w.is_public !== false);
+  const privateList = [
+    ...publicWorks.filter(w => w.is_public === false),
+    ...privateWorks
+  ];
+
+  const currentList = activeTab === 'public' ? publicList : privateList;
 
   const handleDownload = (work) => {
     const a = document.createElement('a');
     a.href = work.image_data;
-    a.download = `${(work.title || 'public_work').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
+    a.download = `${(work.title || 'screenshot').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -37,20 +49,17 @@ export default function PublicWorksModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-fade-in">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-6 max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4 shrink-0">
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="p-2.5 rounded-xl bg-violet-100 text-violet-700">
               <Image className="w-5 h-5" />
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-800 flex items-center gap-2">
-                Public Works Gallery
-                <span className="px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 text-xs font-semibold">
-                  {publicWorks.length} {publicWorks.length === 1 ? 'Snapshot' : 'Snapshots'}
-                </span>
+                Whiteboard Screenshots & Public Works
               </h3>
               <p className="text-xs text-slate-500">
-                Shared high-resolution screenshots and whiteboard captures published by session members
+                Browse shared public works or your private system screenshots
               </p>
             </div>
           </div>
@@ -65,7 +74,7 @@ export default function PublicWorksModal({
                 className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                Capture New Snapshot
+                Capture Screenshot
               </button>
             )}
             <button
@@ -77,14 +86,45 @@ export default function PublicWorksModal({
           </div>
         </div>
 
+        {/* Tab Switcher: Public Works vs My Private Screenshots */}
+        <div className="flex border-b border-slate-200 gap-4 mb-4">
+          <button
+            onClick={() => setActiveTab('public')}
+            className={`pb-2.5 text-xs font-bold transition border-b-2 flex items-center gap-1.5 ${
+              activeTab === 'public'
+                ? 'border-violet-600 text-violet-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Globe className="w-3.5 h-3.5" />
+            Public Works Screenshots ({publicList.length})
+          </button>
+
+          <button
+            onClick={() => setActiveTab('private')}
+            className={`pb-2.5 text-xs font-bold transition border-b-2 flex items-center gap-1.5 ${
+              activeTab === 'private'
+                ? 'border-violet-600 text-violet-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            My System Screenshots ({privateList.length})
+          </button>
+        </div>
+
         {/* Gallery Content */}
         <div className="overflow-y-auto flex-1 pr-1">
-          {publicWorks.length === 0 ? (
+          {currentList.length === 0 ? (
             <div className="p-12 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl my-4 bg-slate-50/50">
               <Image className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-              <h4 className="font-bold text-sm text-slate-700">No public work snapshots published yet</h4>
+              <h4 className="font-bold text-sm text-slate-700">
+                {activeTab === 'public' ? 'No public work snapshots published yet' : 'No private screenshots in your system yet'}
+              </h4>
               <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-                Members with permission can capture instant screenshots of the canvas and publish them directly to this shared gallery.
+                {activeTab === 'public'
+                  ? 'Screenshots published for Public Works are visible to all room members and saved here.'
+                  : 'Screenshots saved in your own system are stored privately and never published to the room.'}
               </p>
               {onOpenExportModal && (
                 <button
@@ -95,14 +135,15 @@ export default function PublicWorksModal({
                   className="mt-4 px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl transition inline-flex items-center gap-1.5 shadow-sm"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  Capture & Publish Screenshot
+                  Capture New Screenshot
                 </button>
               )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {publicWorks.map((work) => {
-                const canDelete = isHost || work.author_code === currentUserCode;
+              {currentList.map((work) => {
+                const isPublic = work.is_public !== false;
+                const canDelete = isHost || work.author_code === currentUserCode || !isPublic;
 
                 return (
                   <div
@@ -130,9 +171,16 @@ export default function PublicWorksModal({
                     {/* Metadata Card Footer */}
                     <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
                       <div>
-                        <h4 className="font-bold text-xs text-slate-800 line-clamp-1" title={work.title}>
-                          {work.title}
-                        </h4>
+                        <div className="flex items-center justify-between gap-1">
+                          <h4 className="font-bold text-xs text-slate-800 truncate" title={work.title}>
+                            {work.title}
+                          </h4>
+                          <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
+                            isPublic ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-600'
+                          }`}>
+                            {isPublic ? 'Public' : 'Private'}
+                          </span>
+                        </div>
                         <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
                           <span className="flex items-center gap-1 font-medium text-slate-600">
                             <User className="w-3 h-3 text-violet-500" />
@@ -157,8 +205,8 @@ export default function PublicWorksModal({
                         {canDelete && (
                           <button
                             onClick={() => {
-                              if (window.confirm(`Delete snapshot "${work.title}" from Public Works?`)) {
-                                onDeleteWork(work.id);
+                              if (window.confirm(`Delete snapshot "${work.title}"?`)) {
+                                onDeleteWork(work.id, isPublic);
                               }
                             }}
                             title="Delete this snapshot"
@@ -220,4 +268,3 @@ export default function PublicWorksModal({
     </div>
   );
 }
-

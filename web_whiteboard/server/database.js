@@ -126,6 +126,12 @@ try { db.exec("ALTER TABLE rooms ADD COLUMN canva_perm TEXT DEFAULT 'everyone'")
 try { db.exec("ALTER TABLE rooms ADD COLUMN chat_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN instances_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN public_work_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN grid_style TEXT DEFAULT 'square'"); } catch(e) {}
+
+try { db.exec("ALTER TABLE milestones ADD COLUMN is_public INTEGER DEFAULT 1"); } catch(e) {}
+try { db.exec("ALTER TABLE milestones ADD COLUMN original_snapshot_json TEXT DEFAULT '[]'"); } catch(e) {}
+try { db.exec("ALTER TABLE milestones ADD COLUMN host_sandbox_json TEXT DEFAULT '[]'"); } catch(e) {}
+try { db.exec("ALTER TABLE public_works ADD COLUMN is_public INTEGER DEFAULT 1"); } catch(e) {}
 
 /**
  * Generate a unique 8-character Account Code: USR-XXXX
@@ -307,6 +313,17 @@ export function updateMemberPermission(roomCode, userCode, canDraw, isCohost = n
   }
 }
 
+export function updateRoomGridStyle(code, gridStyle) {
+  const cleanRoom = code.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE rooms 
+    SET grid_style = ?, updated_at = datetime('now', 'localtime')
+    WHERE UPPER(code) = ?
+  `);
+  stmt.run(gridStyle || 'square', cleanRoom);
+  return getRoom(cleanRoom);
+}
+
 export function setAllMembersDrawingPermission(roomCode, canDraw) {
   const cleanRoom = roomCode.trim().toUpperCase();
   const stmt = db.prepare(`
@@ -315,6 +332,70 @@ export function setAllMembersDrawingPermission(roomCode, canDraw) {
     WHERE UPPER(room_code) = ? AND role != 'host'
   `);
   stmt.run(canDraw ? 1 : 0, cleanRoom);
+}
+
+export function setAllMembersChatPermission(roomCode, canChat) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE room_members
+    SET can_chat = ?
+    WHERE UPPER(room_code) = ? AND role != 'host'
+  `);
+  stmt.run(canChat ? 1 : 0, cleanRoom);
+}
+
+export function setAllMembersInstancesPermission(roomCode, canInstances) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE room_members
+    SET can_instances = ?
+    WHERE UPPER(room_code) = ? AND role != 'host'
+  `);
+  stmt.run(canInstances ? 1 : 0, cleanRoom);
+}
+
+export function setAllMembersPublicWorkPermission(roomCode, canPublicWork) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const stmt = db.prepare(`
+    UPDATE room_members
+    SET can_public_work = ?
+    WHERE UPPER(room_code) = ? AND role != 'host'
+  `);
+  stmt.run(canPublicWork ? 1 : 0, cleanRoom);
+}
+
+export function setMatrixSelectedMembers(roomCode, permKey, selectedUserCodes = []) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const validKey = ['canva', 'chat', 'instances', 'public_work'].includes(permKey) ? permKey : 'canva';
+  
+  // 1. Set room permission to 'selected'
+  const colRoom = `${validKey}_perm`;
+  const roomStmt = db.prepare(`UPDATE rooms SET ${colRoom} = 'selected', updated_at = datetime('now', 'localtime') WHERE UPPER(code) = ?`);
+  roomStmt.run(cleanRoom);
+
+  // 2. Set individual column in room_members
+  const memberColMap = {
+    canva: 'can_draw',
+    chat: 'can_chat',
+    instances: 'can_instances',
+    public_work: 'can_public_work'
+  };
+  const memberCol = memberColMap[validKey];
+
+  const normalizedCodes = new Set(selectedUserCodes.map(c => String(c).trim().toUpperCase()));
+  const allMembers = getRoomMembers(cleanRoom);
+
+  const updateStmt = db.prepare(`
+    UPDATE room_members
+    SET ${memberCol} = ?
+    WHERE UPPER(room_code) = ? AND UPPER(user_code) = ? AND role != 'host'
+  `);
+
+  for (const m of allMembers) {
+    if (m.role === 'host') continue;
+    const isAllowed = normalizedCodes.has(m.user_code.trim().toUpperCase()) ? 1 : 0;
+    updateStmt.run(isAllowed, cleanRoom, m.user_code.trim().toUpperCase());
+  }
 }
 
 export function removeRoomMember(roomCode, userCode) {
@@ -440,9 +521,15 @@ export function clearRoomChat(roomCode) {
  */
 export function saveMilestone(roomCode, milestone) {
   const cleanRoom = roomCode.trim().toUpperCase();
+  const snapshotJson = JSON.stringify(milestone.snapshot || milestone.actions || []);
   const stmt = db.prepare(`
-    INSERT INTO milestones (id, room_code, title, author_code, author_name, snapshot_json, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO milestones (id, room_code, title, author_code, author_name, snapshot_json, original_snapshot_json, host_sandbox_json, is_public, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      snapshot_json = excluded.snapshot_json,
+      host_sandbox_json = excluded.host_sandbox_json,
+      is_public = excluded.is_public
   `);
   stmt.run(
     milestone.id,
@@ -450,27 +537,46 @@ export function saveMilestone(roomCode, milestone) {
     milestone.title,
     milestone.author_code || '',
     milestone.author_name || milestone.author || 'User',
-    JSON.stringify(milestone.snapshot || milestone.actions || []),
-    milestone.timestamp || ''
+    snapshotJson,
+    milestone.original_snapshot_json ? JSON.stringify(milestone.original_snapshot_json) : snapshotJson,
+    milestone.host_sandbox_json ? JSON.stringify(milestone.host_sandbox_json) : snapshotJson,
+    milestone.is_public !== undefined ? (milestone.is_public ? 1 : 0) : 1,
+    milestone.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   );
 }
 
-export function getRoomMilestones(roomCode) {
+export function getRoomMilestones(roomCode, viewerUserCode = null) {
   const stmt = db.prepare(`
-    SELECT id, title, author_code, author_name, snapshot_json, timestamp
+    SELECT id, title, author_code, author_name, snapshot_json, original_snapshot_json, host_sandbox_json, is_public, timestamp
     FROM milestones
     WHERE UPPER(room_code) = ?
     ORDER BY rowid DESC
   `);
-  return stmt.all(roomCode.trim().toUpperCase()).map(m => ({
-    id: m.id,
-    title: m.title,
-    author_code: m.author_code,
-    author: m.author_name,
-    author_name: m.author_name,
-    timestamp: m.timestamp,
-    snapshot: JSON.parse(m.snapshot_json || '[]')
-  }));
+  const rows = stmt.all(roomCode.trim().toUpperCase());
+  return rows.filter(m => {
+    // Return all public milestones OR private ones authored by the viewer
+    if (m.is_public !== 0) return true;
+    if (viewerUserCode && m.author_code && m.author_code.trim().toUpperCase() === viewerUserCode.trim().toUpperCase()) {
+      return true;
+    }
+    return false;
+  }).map(m => {
+    const snap = JSON.parse(m.snapshot_json || '[]');
+    const orig = m.original_snapshot_json ? JSON.parse(m.original_snapshot_json) : snap;
+    const hostSand = m.host_sandbox_json ? JSON.parse(m.host_sandbox_json) : snap;
+    return {
+      id: m.id,
+      title: m.title,
+      author_code: m.author_code,
+      author: m.author_name,
+      author_name: m.author_name,
+      timestamp: m.timestamp,
+      is_public: m.is_public !== 0,
+      snapshot: snap,
+      original_snapshot: orig,
+      host_sandbox: hostSand
+    };
+  });
 }
 
 export function deleteMilestone(milestoneId) {
@@ -483,17 +589,24 @@ export function updateMilestoneSnapshot(milestoneId, snapshot) {
   stmt.run(JSON.stringify(snapshot || []), milestoneId);
 }
 
+export function updateMilestoneHostSandbox(milestoneId, sandboxActions) {
+  const snapJson = JSON.stringify(sandboxActions || []);
+  const stmt = db.prepare('UPDATE milestones SET host_sandbox_json = ?, snapshot_json = ? WHERE id = ?');
+  stmt.run(snapJson, snapJson, milestoneId);
+}
+
 /**
  * Public Works (Shared High-Res Screenshots)
  */
 export function savePublicWork(roomCode, work) {
   const cleanRoom = roomCode.trim().toUpperCase();
   const stmt = db.prepare(`
-    INSERT INTO public_works (id, room_code, title, author_code, author_name, image_data, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO public_works (id, room_code, title, author_code, author_name, image_data, is_public, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
-      image_data = excluded.image_data
+      image_data = excluded.image_data,
+      is_public = excluded.is_public
   `);
   stmt.run(
     work.id,
@@ -502,18 +615,29 @@ export function savePublicWork(roomCode, work) {
     work.author_code || '',
     work.author_name || work.author || 'User',
     work.image_data || work.image || '',
+    work.is_public !== undefined ? (work.is_public ? 1 : 0) : 1,
     work.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   );
 }
 
-export function getPublicWorks(roomCode) {
+export function getPublicWorks(roomCode, viewerUserCode = null) {
   const stmt = db.prepare(`
-    SELECT id, title, author_code, author_name, image_data, timestamp, created_at
+    SELECT id, title, author_code, author_name, image_data, is_public, timestamp, created_at
     FROM public_works
     WHERE UPPER(room_code) = ?
     ORDER BY rowid DESC
   `);
-  return stmt.all(roomCode.trim().toUpperCase());
+  const rows = stmt.all(roomCode.trim().toUpperCase());
+  return rows.filter(w => {
+    if (w.is_public !== 0) return true;
+    if (viewerUserCode && w.author_code && w.author_code.trim().toUpperCase() === viewerUserCode.trim().toUpperCase()) {
+      return true;
+    }
+    return false;
+  }).map(w => ({
+    ...w,
+    is_public: w.is_public !== 0
+  }));
 }
 
 export function deletePublicWork(workId) {
@@ -567,12 +691,17 @@ export default {
   getRoom,
   listPublicRooms,
   updateRoomSettings,
+  updateRoomGridStyle,
   updateRoomPermissions,
   updateMemberCustomPermissions,
+  setMatrixSelectedMembers,
   addRoomMember,
   getRoomMembers,
   updateMemberPermission,
   setAllMembersDrawingPermission,
+  setAllMembersChatPermission,
+  setAllMembersInstancesPermission,
+  setAllMembersPublicWorkPermission,
   removeRoomMember,
   getUserEnrolledRooms,
   saveAction,
@@ -586,6 +715,7 @@ export default {
   getRoomMilestones,
   deleteMilestone,
   updateMilestoneSnapshot,
+  updateMilestoneHostSandbox,
   savePublicWork,
   getPublicWorks,
   deletePublicWork

@@ -15,8 +15,10 @@ import {
   Image,
   ChevronDown,
   ChevronUp,
-  Settings
+  Settings,
+  Sliders
 } from 'lucide-react';
+import SelectedMembersModal from './SelectedMembersModal';
 
 export default function ParticipantsDrawer({
   isOpen,
@@ -36,6 +38,7 @@ export default function ParticipantsDrawer({
   onOpenAddMember
 }) {
   const [showMatrix, setShowMatrix] = useState(true);
+  const [selectedModalKey, setSelectedModalKey] = useState(null);
 
   if (!isOpen) return null;
 
@@ -49,11 +52,28 @@ export default function ParticipantsDrawer({
 
   const handlePermChange = (key, val) => {
     if (!onUpdateRoomPermissions) return;
+    if (val === 'selected') {
+      // Pop up the Selected Members Dialog Box for the host to choose allowed members
+      setSelectedModalKey(key);
+      return;
+    }
     onUpdateRoomPermissions({
       canva_perm: key === 'canva' ? val : canvaPerm,
       chat_perm: key === 'chat' ? val : chatPerm,
       instances_perm: key === 'instances' ? val : instancesPerm,
       public_work_perm: key === 'public_work' ? val : publicWorkPerm
+    });
+  };
+
+  const handleApplySelectedMembers = (key, selectedCodes) => {
+    if (!onUpdateRoomPermissions) return;
+    onUpdateRoomPermissions({
+      perm_key: key,
+      selected_user_codes: selectedCodes,
+      canva_perm: key === 'canva' ? 'selected' : canvaPerm,
+      chat_perm: key === 'chat' ? 'selected' : chatPerm,
+      instances_perm: key === 'instances' ? 'selected' : instancesPerm,
+      public_work_perm: key === 'public_work' ? 'selected' : publicWorkPerm
     });
   };
 
@@ -121,14 +141,23 @@ export default function ParticipantsDrawer({
                       ].map((opt) => (
                         <button
                           key={opt.id}
-                          onClick={() => handlePermChange(row.key, opt.id)}
-                          className={`py-1 text-[10px] font-bold rounded-md transition ${
+                          onClick={() => {
+                            if (opt.id === 'selected') {
+                              setSelectedModalKey(row.key);
+                            } else {
+                              handlePermChange(row.key, opt.id);
+                            }
+                          }}
+                          className={`py-1 text-[10px] font-bold rounded-md transition flex items-center justify-center gap-1 ${
                             row.current === opt.id
                               ? 'bg-blue-600 text-white shadow-2xs'
                               : 'text-slate-600 hover:bg-slate-100'
                           }`}
                         >
-                          {opt.label}
+                          <span>{opt.label}</span>
+                          {opt.id === 'selected' && row.current === 'selected' && (
+                            <Sliders className="w-2.5 h-2.5 opacity-80" />
+                          )}
                         </button>
                       ))}
                     </div>
@@ -313,6 +342,15 @@ export default function ParticipantsDrawer({
           );
         })}
       </div>
+
+      {/* Selected Members Dialog Box */}
+      <SelectedMembersModal
+        isOpen={Boolean(selectedModalKey)}
+        onClose={() => setSelectedModalKey(null)}
+        permKey={selectedModalKey || 'canva'}
+        members={members}
+        onApply={handleApplySelectedMembers}
+      />
     </div>
   );
 }

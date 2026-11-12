@@ -8,6 +8,7 @@ import TableModal from './TableModal';
 import ShapesModal, { SHAPES_LIST } from './ShapesModal';
 import ExportModal from './ExportModal';
 import PublicWorksModal from './PublicWorksModal';
+import SaveDestinationModal from './SaveDestinationModal';
 import { recognizeInkStrokes } from '../utils/inkToFont';
 import {
   Users,
@@ -26,7 +27,15 @@ import {
   Radio,
   Eye,
   SquareDashedMousePointer,
-  Upload
+  Upload,
+  Bold,
+  Italic,
+  Type,
+  Trash2,
+  Sparkles,
+  Globe,
+  HardDrive,
+  Sliders
 } from 'lucide-react';
 
 export default function Whiteboard({
@@ -45,7 +54,15 @@ export default function Whiteboard({
   const [activeShape, setActiveShape] = useState('rect');
   const [strokeColor, setStrokeColor] = useState('#000000');
   const [strokeWidth, setStrokeWidth] = useState(4);
+  const [fillShape, setFillShape] = useState(false);
+  const [fillColor, setFillColor] = useState('#3b82f6');
   const [gridMode, setGridMode] = useState('square'); // 'square' | 'dot' | 'ruled' | 'none'
+
+  // Textbox Typography & Styling State
+  const [activeFontFamily, setActiveFontFamily] = useState('Inter, sans-serif');
+  const [activeFontSize, setActiveFontSize] = useState(24);
+  const [activeFontBold, setActiveFontBold] = useState(false);
+  const [activeFontItalic, setActiveFontItalic] = useState(false);
 
   // Infinite Canvas Pan & Zoom State
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -59,7 +76,8 @@ export default function Whiteboard({
   const [streamingStrokes, setStreamingStrokes] = useState(new Map());
 
   // Instance Sandbox View State
-  const [viewingInstance, setViewingInstance] = useState(null); // null | { id, title, actions: [...] }
+  const [viewingInstance, setViewingInstance] = useState(null); // null | { id, title, actions: [...], original_snapshot: [...], host_sandbox: [...] }
+  const [sandboxViewMode, setSandboxViewMode] = useState('sandbox'); // 'original' | 'sandbox' | 'host_sandbox'
 
   // Selection & Manipulation State
   const [selectedId, setSelectedId] = useState(null);
@@ -119,6 +137,25 @@ export default function Whiteboard({
     role: 'member'
   });
 
+  // Private Local Gallery State (Personal System Only)
+  const [privateMilestones, setPrivateMilestones] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('my_private_instances') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [privateScreenshots, setPrivateScreenshots] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('my_private_screenshots') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  // Save Destination Modal Config (2 Options: Private vs Public Works)
+  const [saveModalConfig, setSaveModalConfig] = useState(null); // null | { mode: 'screenshot' | 'instance', defaultTitle: string }
+
   // Drawers & Modals
   const [isParticipantsOpen, setIsParticipantsOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -131,8 +168,14 @@ export default function Whiteboard({
   const [statusText, setStatusText] = useState(isOffline ? 'Offline Personal Workspace' : 'Connected to session');
   const [roomNotification, setRoomNotification] = useState(null);
 
-  // Current display actions (switches dynamically between live room and sandbox instance)
-  const currentDisplayActions = viewingInstance ? (viewingInstance.actions || []) : actions;
+  // Current display actions (switches dynamically between live room and sandbox instance modes)
+  const currentDisplayActions = viewingInstance
+    ? (sandboxViewMode === 'original'
+        ? (viewingInstance.original_snapshot || viewingInstance.actions || [])
+        : sandboxViewMode === 'host_sandbox'
+        ? (viewingInstance.host_sandbox || viewingInstance.actions || [])
+        : (viewingInstance.actions || []))
+    : actions;
 
   // Persist offline actions & milestones
   useEffect(() => {
@@ -157,6 +200,8 @@ export default function Whiteboard({
 
   const isHost = roomData?.host_user_code === user?.user_code || isOffline;
   const isCohost = myPermissions.role === 'cohost';
+  const hasTopBanner = Boolean(viewingInstance || (!myPermissions.can_draw && !viewingInstance));
+  const selectedAction = selectedId ? currentDisplayActions.find(a => a.id === selectedId && !a.undone) : null;
 
   // Helper notification toast
   const showNotification = (text) => {
@@ -199,6 +244,9 @@ export default function Whiteboard({
     switch (msg.type) {
       case 'join_ack':
         setRoomData(msg.room);
+        if (msg.room?.grid_style) {
+          setGridMode(msg.room.grid_style);
+        }
         setMyPermissions(msg.my_permissions || {
           can_draw: true,
           can_chat: true,
@@ -212,6 +260,11 @@ export default function Whiteboard({
         setMilestones(msg.milestones || []);
         setPublicWorks(msg.public_works || []);
         setStatusText(`Connected to ${msg.room.title}`);
+        break;
+
+      case 'grid_style_updated':
+        setGridMode(msg.grid_style);
+        showNotification(`Canvas Grid updated to: ${msg.grid_style.toUpperCase()}`);
         break;
 
       case 'user_joined':
@@ -352,6 +405,15 @@ export default function Whiteboard({
         setPublicWorks(prev => prev.filter(p => p.id !== msg.id));
         break;
 
+      case 'milestone_deleted':
+        setMilestones(prev => prev.filter(m => m.id !== msg.id));
+        showNotification('Instance removed');
+        break;
+
+      case 'error':
+        showNotification(`⚠️ ${msg.text || 'Action error'}`);
+        break;
+
       case 'instance_snapshot_updated':
         setMilestones(prev => prev.map(m => m.id === msg.instance_id ? { ...m, snapshot: msg.snapshot } : m));
         if (viewingInstance && viewingInstance.id === msg.instance_id) {
@@ -392,10 +454,6 @@ export default function Whiteboard({
         setStatusText(msg.text);
         showNotification(msg.text);
         break;
-
-      case 'error':
-        alert(msg.text);
-        break;
     }
   };
 
@@ -411,6 +469,10 @@ export default function Whiteboard({
       // Ctrl+Z: Undo
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
+        if (!myPermissions.can_draw && !viewingInstance) {
+          showNotification('🔒 Canvas editing is disabled for you by the Host.');
+          return;
+        }
         handleUndo();
         return;
       }
@@ -419,6 +481,10 @@ export default function Whiteboard({
       if (((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) ||
           ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'z' || e.key === 'Z'))) {
         e.preventDefault();
+        if (!myPermissions.can_draw && !viewingInstance) {
+          showNotification('🔒 Canvas editing is disabled for you by the Host.');
+          return;
+        }
         handleRedo();
         return;
       }
@@ -432,6 +498,10 @@ export default function Whiteboard({
 
       // Delete or Backspace: delete selected item
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (!myPermissions.can_draw && !viewingInstance) {
+          showNotification('🔒 Canvas editing is disabled for you by the Host.');
+          return;
+        }
         if (selectedId) {
           e.preventDefault();
           const act = currentDisplayActions.find(a => a.id === selectedId);
@@ -584,9 +654,13 @@ export default function Whiteboard({
       return { x: minX - 4, y: minY - 4, w: Math.max(14, Math.abs(act.x2 - act.x1) + 8), h: Math.max(14, Math.abs(act.y2 - act.y1) + 8) };
     }
     if (act.kind === 'text') {
-      const approxW = Math.max(40, (act.text || '').length * (act.fontSize || 20) * 0.6);
-      const approxH = (act.fontSize || 20) * 1.3;
-      return { x: act.x - 2, y: act.y - approxH, w: approxW + 4, h: approxH + 6 };
+      const size = act.fontSize || 20;
+      const lines = (act.text || '').split('\n');
+      let maxLen = 0;
+      for (const l of lines) { if (l.length > maxLen) maxLen = l.length; }
+      const approxW = Math.max(50, maxLen * size * 0.65);
+      const approxH = Math.max(size * 1.25, lines.length * size * 1.3);
+      return { x: act.x - 4, y: act.y - size, w: approxW + 8, h: approxH + 8 };
     }
     if (act.kind === 'stroke' && act.points && act.points.length > 0) {
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -656,6 +730,7 @@ export default function Whiteboard({
         kind: activeShape,
         color: strokeColor,
         width: strokeWidth,
+        fill: fillShape ? (fillColor || strokeColor) : 'transparent',
         opacity: 0.75,
         x: Math.min(sx, ex),
         y: Math.min(sy, ey),
@@ -714,7 +789,7 @@ export default function Whiteboard({
     }
 
     ctx.restore();
-  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId]);
+  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, fillShape, fillColor, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId]);
 
   useEffect(() => {
     redrawCanvas();
@@ -858,11 +933,17 @@ export default function Whiteboard({
         break;
       }
 
-      case 'text':
-        ctx.font = `${act.fontSize || 20}px ${act.fontFamily || 'Inter, sans-serif'}`;
+      case 'text': {
+        const fontStyle = `${act.italic ? 'italic ' : ''}${act.bold ? 'bold ' : ''}${act.fontSize || 20}px ${act.fontFamily || 'Inter, sans-serif'}`;
+        ctx.font = fontStyle;
         ctx.fillStyle = act.color || '#000000';
-        ctx.fillText(act.text || '', act.x, act.y);
+        const lines = (act.text || '').split('\n');
+        const lineHeight = (act.fontSize || 20) * 1.25;
+        lines.forEach((l, idx) => {
+          ctx.fillText(l, act.x, act.y + idx * lineHeight);
+        });
         break;
+      }
 
       case 'sticky': {
         const w = act.w || 160;
@@ -1066,6 +1147,12 @@ export default function Whiteboard({
     }
 
     const { x, y } = getCanvasCoords(e);
+
+    // If in original snapshot view mode, prompt user to switch to sandbox simulation
+    if (viewingInstance && sandboxViewMode === 'original') {
+      showNotification('Viewing original snapshot. Switch to "Sandbox Simulation" tab to sketch and edit.');
+      return;
+    }
 
     // If host blocked drawing, block ALL interactive canvas operations
     if (!myPermissions.can_draw && !viewingInstance) {
@@ -1280,6 +1367,17 @@ export default function Whiteboard({
       setSelectedId(hitId);
       if (hitId) {
         const hitAct = currentDisplayActions.find(a => a.id === hitId);
+        // Double click on text to edit
+        if (hitAct && hitAct.kind === 'text' && e.detail === 2) {
+          if (myPermissions.can_draw || viewingInstance) {
+            const newText = prompt('Edit Text:', hitAct.text || '');
+            if (newText !== null && newText !== hitAct.text) {
+              commitAction({ ...hitAct, text: newText });
+            }
+          }
+          return;
+        }
+
         setSelectedDrag({
           id: hitId,
           startX: x,
@@ -1338,10 +1436,13 @@ export default function Whiteboard({
           x,
           y,
           color: strokeColor,
-          fontSize: strokeWidth * 5 + 12,
-          fontFamily: 'Inter, sans-serif'
+          fontSize: activeFontSize || 24,
+          fontFamily: activeFontFamily || 'Inter, sans-serif',
+          bold: activeFontBold,
+          italic: activeFontItalic
         };
         commitAction(textAction);
+        setSelectedId(textAction.id);
       }
       setIsDrawing(false);
     } else if (activeTool === 'sticky') {
@@ -1531,6 +1632,11 @@ export default function Whiteboard({
           if (orig.kind === 'line' || orig.kind === 'arrow') {
             return { ...a, x2: orig.x1 + newW, y2: orig.y1 + newH };
           }
+          if (orig.kind === 'text') {
+            const scale = Math.max(0.4, Math.max(newW / (selectedResize.origW || 40), newH / (selectedResize.origH || 24)));
+            const newFontSize = Math.round(Math.max(12, Math.min(140, (orig.fontSize || 20) * scale)));
+            return { ...a, fontSize: newFontSize };
+          }
         }
         return a;
       });
@@ -1638,7 +1744,8 @@ export default function Whiteboard({
             w,
             h,
             color: strokeColor,
-            width: strokeWidth
+            width: strokeWidth,
+            fill: fillShape ? (fillColor || strokeColor) : 'transparent'
           };
         }
       } else if (activeShape === 'line' || activeShape === 'arrow') {
@@ -1948,6 +2055,10 @@ export default function Whiteboard({
   };
 
   const handleCycleGrid = () => {
+    if (!myPermissions.can_draw && !isHost) {
+      showNotification('🔒 Canvas grid changes are restricted by the Host.');
+      return;
+    }
     const modes = ['square', 'dot', 'ruled', 'none'];
     const labels = {
       square: '🔲 Square Graph Grid',
@@ -1959,6 +2070,13 @@ export default function Whiteboard({
     const nextMode = modes[nextIdx];
     setGridMode(nextMode);
     showNotification(`Canvas Grid: ${labels[nextMode]}`);
+
+    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'set_grid_style',
+        grid_style: nextMode
+      }));
+    }
   };
 
   // ── SCREENSHOT / EXPORT / PUBLIC WORKS ─────────────────────────────
@@ -1988,118 +2106,282 @@ export default function Whiteboard({
   };
 
   const handleTakeScreenshot = () => {
-    try {
+    const defaultName = `${(roomData?.title || room.title || 'Canvas').replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    setSaveModalConfig({
+      mode: 'screenshot',
+      defaultTitle: defaultName
+    });
+  };
+
+  const handleOpenSaveInstanceModal = () => {
+    const defaultName = `Milestone - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    setSaveModalConfig({
+      mode: 'instance',
+      defaultTitle: defaultName
+    });
+  };
+
+  const handleConfirmSaveDestination = ({ destination, title }) => {
+    const isPublic = destination === 'public';
+
+    if (saveModalConfig?.mode === 'screenshot') {
       const dataUrl = captureScreenshotDataUrl();
       if (!dataUrl) return;
 
-      const a = document.createElement('a');
-      const safeTitle = (roomData?.title || room.title || 'whiteboard').replace(/[^a-zA-Z0-9]/g, '_');
-      a.download = `${safeTitle}_snapshot_${Date.now()}.png`;
-      a.href = dataUrl;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+      if (isPublic) {
+        if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'save_public_work',
+            title,
+            image_data: dataUrl,
+            is_public: 1
+          }));
+          showNotification(`🌐 Published screenshot "${title}" to Public Works!`);
+        }
+      } else {
+        // Save to My Own System (Private)
+        const privWork = {
+          id: `pw_priv_${Date.now()}`,
+          title,
+          image_data: dataUrl,
+          is_public: false,
+          author_code: user?.user_code || 'local',
+          author_name: user?.name || 'Local User',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setPrivateScreenshots(prev => {
+          const next = [privWork, ...prev];
+          try { localStorage.setItem('my_private_screenshots', JSON.stringify(next)); } catch(e){}
+          return next;
+        });
 
-      showNotification('📸 Screenshot downloaded successfully!');
-    } catch (err) {
-      console.error('Screenshot error:', err);
-      alert('Failed to generate screenshot: ' + err.message);
+        // Trigger local file download
+        const a = document.createElement('a');
+        a.download = `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
+        a.href = dataUrl;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        showNotification(`💾 Screenshot saved to your own system files!`);
+      }
+    } else if (saveModalConfig?.mode === 'instance') {
+      const unUndoneActions = currentDisplayActions.filter(a => !a.undone);
+
+      if (isPublic) {
+        if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'save_milestone',
+            title,
+            snapshot: unUndoneActions,
+            is_public: 1
+          }));
+          showNotification(`🌐 Published instance "${title}" to room Public Works!`);
+        }
+      } else {
+        // Save to My Own System (Private Instance)
+        const privMs = {
+          id: `ms_priv_${Date.now()}`,
+          title,
+          is_public: false,
+          author_code: user?.user_code || 'local',
+          author_name: user?.name || 'Local User',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          snapshot: unUndoneActions,
+          original_snapshot: unUndoneActions,
+          host_sandbox: unUndoneActions
+        };
+        setPrivateMilestones(prev => {
+          const next = [privMs, ...prev];
+          try { localStorage.setItem('my_private_instances', JSON.stringify(next)); } catch(e){}
+          return next;
+        });
+        showNotification(`💾 Instance "${title}" saved to your own local system!`);
+      }
+    }
+
+    setSaveModalConfig(null);
+  };
+
+  const handlePublishMilestone = (optionsOrTitle) => {
+    if (typeof optionsOrTitle === 'object' && optionsOrTitle !== null) {
+      handleConfirmSaveDestination({
+        destination: optionsOrTitle.destination || 'public',
+        title: optionsOrTitle.title || `Instance - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      });
+      return;
+    }
+    const defaultTitle = typeof optionsOrTitle === 'string' && optionsOrTitle.trim()
+      ? optionsOrTitle.trim()
+      : `Instance - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    setSaveModalConfig({
+      mode: 'instance',
+      defaultTitle
+    });
+  };
+
+  const handlePublishPublicWork = (optionsOrTitle) => {
+    if (typeof optionsOrTitle === 'object' && optionsOrTitle !== null) {
+      handleConfirmSaveDestination({
+        destination: optionsOrTitle.destination || 'public',
+        title: optionsOrTitle.title || `Screenshot - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+      });
+      return;
+    }
+    const defaultTitle = typeof optionsOrTitle === 'string' && optionsOrTitle.trim()
+      ? optionsOrTitle.trim()
+      : `Screenshot - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    setSaveModalConfig({
+      mode: 'screenshot',
+      defaultTitle
+    });
+  };
+
+  const handleUpdateTextProperty = (property, value) => {
+    if (property === 'fontFamily') setActiveFontFamily(value);
+    if (property === 'fontSize') setActiveFontSize(value);
+    if (property === 'bold') setActiveFontBold(value);
+    if (property === 'italic') setActiveFontItalic(value);
+    if (property === 'color') setStrokeColor(value);
+
+    if (selectedId) {
+      const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
+      if (act && act.kind === 'text') {
+        const updated = {
+          ...act,
+          [property]: value
+        };
+        commitAction(updated);
+      }
     }
   };
 
-  const handlePublishPublicWork = (title) => {
-    const dataUrl = captureScreenshotDataUrl();
-    if (!dataUrl) return;
+  const handleEditTextContent = () => {
+    if (!selectedId) return;
+    const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
+    if (act && act.kind === 'text') {
+      const newText = prompt('Edit Text Content:', act.text || '');
+      if (newText !== null && newText !== act.text) {
+        commitAction({ ...act, text: newText });
+      }
+    }
+  };
 
-    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'save_public_work',
-        title,
-        image_data: dataUrl
-      }));
-      showNotification(`🖼️ Published screenshot "${title}" to Public Works!`);
+  const handleDeleteSelected = () => {
+    if (!selectedId) return;
+    const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
+    if (act) {
+      commitAction({ ...act, undone: true });
+      setSelectedId(null);
+    }
+  };
+
+  const handleDeletePublicWork = (workId, isPublic = true) => {
+    if (isPublic) {
+      if (!isHost) {
+        showNotification('🔒 Only the host can delete public screenshots.');
+        return;
+      }
+      if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'delete_public_work',
+          id: workId
+        }));
+      }
+      setPublicWorks(prev => prev.filter(p => p.id !== workId));
+      showNotification('Screenshot removed from Public Works');
     } else {
-      const pw = {
-        id: `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        room_code: room.code,
-        title,
-        author_code: user?.user_code || 'local',
-        author_name: user?.name || 'Local User',
-        image_data: dataUrl,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setPublicWorks(prev => [pw, ...prev]);
-      showNotification(`🖼️ Saved screenshot "${title}" to local Public Works`);
+      setPrivateScreenshots(prev => {
+        const next = prev.filter(p => p.id !== workId);
+        try { localStorage.setItem('my_private_screenshots', JSON.stringify(next)); } catch(e){}
+        return next;
+      });
+      showNotification('Private screenshot deleted');
     }
   };
 
-  const handleDeletePublicWork = (workId) => {
-    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'delete_public_work',
-        id: workId
-      }));
-    }
-    setPublicWorks(prev => prev.filter(p => p.id !== workId));
-    showNotification('Screenshot removed from Public Works');
-  };
-
-  const handlePublishMilestone = (title) => {
-    const unUndoneActions = currentDisplayActions.filter(a => !a.undone);
-    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'save_milestone',
-        title,
-        snapshot: unUndoneActions
-      }));
-      showNotification(`🏆 Published milestone "${title}" to room works!`);
+  const handleDeleteMilestone = (milestoneId, isPublic = true) => {
+    if (isPublic) {
+      if (!isHost) {
+        showNotification('🔒 Only the host can delete public instances.');
+        return;
+      }
+      if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'delete_milestone',
+          id: milestoneId
+        }));
+      }
+      setMilestones(prev => prev.filter(m => m.id !== milestoneId));
+      showNotification('Instance removed from Public Works');
     } else {
-      const ms = {
-        id: `ms_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        title,
-        author_name: user?.name || 'Local User',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        snapshot: unUndoneActions
-      };
-      setMilestones(prev => [ms, ...prev]);
-      showNotification(`🏆 Saved local milestone: "${title}"`);
+      setPrivateMilestones(prev => {
+        const next = prev.filter(m => m.id !== milestoneId);
+        try { localStorage.setItem('my_private_instances', JSON.stringify(next)); } catch(e){}
+        return next;
+      });
+      showNotification('Private instance deleted');
     }
   };
 
   const handleSaveInstanceEdits = () => {
     if (!viewingInstance) return;
     const unUndone = (viewingInstance.actions || []).filter(a => !a.undone);
-    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'update_instance_snapshot',
-        instance_id: viewingInstance.id,
-        snapshot: unUndone
-      }));
+
+    if (isHost) {
+      // Host saves to server milestone host sandbox (viewable by everyone)
+      if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'update_instance_snapshot',
+          instance_id: viewingInstance.id,
+          snapshot: unUndone
+        }));
+      }
+      setMilestones(prev => prev.map(m => m.id === viewingInstance.id ? { ...m, snapshot: unUndone, host_sandbox: unUndone } : m));
+      showNotification(`💾 Host sandbox updated for instance "${viewingInstance.title}" (viewable by all)`);
+    } else {
+      // Non-host saves locally to their personal account only
+      try {
+        localStorage.setItem(`sandbox_${viewingInstance.id}_${user?.user_code || 'me'}`, JSON.stringify(unUndone));
+      } catch(e){}
+      showNotification(`💾 Sandbox edits saved to your personal account only`);
     }
-    setMilestones(prev => prev.map(m => m.id === viewingInstance.id ? { ...m, snapshot: unUndone } : m));
-    showNotification(`💾 Saved changes in instance "${viewingInstance.title}"`);
+  };
+
+  const handleRestoreMilestone = (snapshot, title) => {
+    if (!isHost) {
+      showNotification('🔒 Restricted: Only the host has permission to restore canvas instances to the live whiteboard.');
+      return;
+    }
+    setViewingInstance(null);
+    setActions(snapshot || []);
+    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'restore_milestone', actions: snapshot, title }));
+    }
+    showNotification(`🔄 Canvas restored to milestone "${title}"`);
   };
 
   const handleReturnToLiveState = () => {
     setViewingInstance(null);
+    setSandboxViewMode('sandbox');
     showNotification('🚀 Returned to live whiteboard session');
   };
 
   const handleBroadcastShowInstance = (ms) => {
+    if (!isHost) {
+      showNotification('🔒 Only the host can broadcast an instance to all members.');
+      return;
+    }
+    const snapToBroadcast = (sandboxViewMode === 'original' ? (ms.original_snapshot || ms.snapshot) : (ms.host_sandbox || ms.snapshot || ms.actions)) || [];
     if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'broadcast_instance_show',
         instance_id: ms.id,
         title: ms.title,
-        actions: ms.snapshot || []
+        snapshot: snapToBroadcast
       }));
     }
-    setViewingInstance({
-      id: ms.id,
-      title: ms.title,
-      actions: JSON.parse(JSON.stringify(ms.snapshot || []))
-    });
-    showNotification(`📡 Broadcasted instance "${ms.title}" to everyone`);
+    showNotification(`📡 Broadcasted sandbox instance "${ms.title}" to everyone on live canvas!`);
   };
 
   const handleShareWithMember = (targetUserCode) => {
@@ -2186,6 +2468,8 @@ export default function Whiteboard({
             <ArrowLeft className="w-4 h-4" />
             <span className="hidden sm:inline">Hub</span>
           </button>
+
+          <img src="/logo.png" className="w-7 h-7 rounded-lg object-contain shadow-2xs border border-slate-200 bg-white p-0.5 shrink-0" alt="Logo" />
 
           <div
             onClick={copyRoomCode}
@@ -2309,29 +2593,103 @@ export default function Whiteboard({
 
       {/* ── INSTANCE SANDBOX MODE TOP FLOATING BANNER ── */}
       {viewingInstance && (
-        <div className="fixed top-14 left-0 right-0 z-25 bg-amber-500 text-white px-4 py-2 shadow-md flex items-center justify-between text-xs font-bold animate-slide-down">
+        <div className="fixed top-14 left-0 right-0 z-25 bg-amber-500 text-white px-3 sm:px-4 py-2 shadow-md flex flex-wrap items-center justify-between gap-2 text-xs font-bold animate-slide-down">
           <div className="flex items-center gap-2 min-w-0">
             <Eye className="w-4 h-4 text-amber-100 shrink-0 animate-pulse" />
             <span className="truncate">
-              Sandboxed in Instance: <span className="underline">{viewingInstance.title}</span> &bull; Edits here do NOT affect the live whiteboard
+              Sandboxed: <span className="underline">{viewingInstance.title}</span> &bull; Edits isolated
             </span>
+
+            {/* View Switcher: Original Snapshot vs Sandbox Simulation vs Host Sandbox */}
+            <div className="flex items-center gap-1 bg-amber-600/70 p-0.5 rounded-lg ml-1 sm:ml-2">
+              <button
+                onClick={() => setSandboxViewMode('original')}
+                title="View original snapshot state before sandbox modifications"
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                  sandboxViewMode === 'original'
+                    ? 'bg-white text-amber-900 shadow-2xs'
+                    : 'text-amber-100 hover:text-white'
+                }`}
+              >
+                <span>📁 Original</span>
+              </button>
+              <button
+                onClick={() => setSandboxViewMode('sandbox')}
+                title="Work in your active sandbox simulation"
+                className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                  sandboxViewMode === 'sandbox'
+                    ? 'bg-white text-amber-900 shadow-2xs'
+                    : 'text-amber-100 hover:text-white'
+                }`}
+              >
+                <span>🧪 Sandbox</span>
+              </button>
+              {viewingInstance.host_sandbox && !isHost && (
+                <button
+                  onClick={() => setSandboxViewMode('host_sandbox')}
+                  title="View the host's published sandbox simulation"
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                    sandboxViewMode === 'host_sandbox'
+                      ? 'bg-white text-amber-900 shadow-2xs'
+                      : 'text-amber-100 hover:text-white'
+                  }`}
+                >
+                  <span>👑 Host Sandbox</span>
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Host Control: Show on Live Canva */}
+            {isHost && (
+              <button
+                onClick={() => handleBroadcastShowInstance(viewingInstance)}
+                title="Host Action: Broadcast this sandbox view to all members live on their canvas"
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold border border-amber-400"
+              >
+                <Radio className="w-3.5 h-3.5 text-white" />
+                <span className="hidden md:inline">Show on Live Canva</span>
+              </button>
+            )}
+
+            {/* Host Control: Restore to Live Canva */}
+            {isHost && (
+              <button
+                onClick={() => {
+                  const snap = sandboxViewMode === 'original'
+                    ? (viewingInstance.original_snapshot || viewingInstance.actions)
+                    : (viewingInstance.actions || viewingInstance.snapshot);
+                  if (window.confirm(`Restore live canvas to "${viewingInstance.title}" (${sandboxViewMode})?`)) {
+                    handleRestoreMilestone(snap, viewingInstance.title);
+                  }
+                }}
+                title="Host Action: Restore this instance state to live whiteboard"
+                className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Restore to Live</span>
+              </button>
+            )}
+
+            {/* Save in Instance (Host saves to server, member saves to local account) */}
             <button
               onClick={handleSaveInstanceEdits}
-              title="Save current canvas edits directly into this instance"
-              className="px-3 py-1 bg-white hover:bg-amber-50 text-amber-900 rounded-lg shadow-sm transition flex items-center gap-1 text-xs font-bold"
+              title={isHost ? "Save sandbox edits to server milestone (viewable by everyone)" : "Save sandbox edits to your local personal account only"}
+              className="px-2.5 py-1 bg-white hover:bg-amber-50 text-amber-900 rounded-lg shadow-sm transition flex items-center gap-1 text-xs font-bold"
             >
-              <Save className="w-3.5 h-3.5" />
-              Save in Instance
+              <Save className="w-3.5 h-3.5 text-amber-700" />
+              <span>Save</span>
             </button>
+
+            {/* Return to Live State */}
             <button
               onClick={handleReturnToLiveState}
               title="Return to the live collaborative whiteboard session"
               className="px-3 py-1 bg-amber-950 hover:bg-black text-white rounded-lg shadow-sm transition flex items-center gap-1 text-xs font-bold"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              Return to Live State
+              <span>Return to Live</span>
             </button>
           </div>
         </div>
@@ -2362,6 +2720,10 @@ export default function Whiteboard({
         setStrokeColor={setStrokeColor}
         strokeWidth={strokeWidth}
         setStrokeWidth={setStrokeWidth}
+        fillShape={fillShape}
+        setFillShape={setFillShape}
+        fillColor={fillColor}
+        setFillColor={setFillColor}
         gridMode={gridMode}
         setGridMode={setGridMode}
         onCycleGrid={handleCycleGrid}
@@ -2377,8 +2739,111 @@ export default function Whiteboard({
         zoom={zoom}
         setZoom={setZoom}
         canDraw={myPermissions.can_draw}
-        hasTopBanner={Boolean(viewingInstance || (!myPermissions.can_draw && !viewingInstance))}
+        hasTopBanner={hasTopBanner}
       />
+
+      {/* ── FLOATING TEXT & TYPOGRAPHY TOOLBAR (When Text Tool is active or a text item is selected) ── */}
+      {((selectedAction && selectedAction.kind === 'text') || activeTool === 'text') && (
+        <div
+          className={`fixed ${
+            hasTopBanner ? 'top-[166px] sm:top-[174px]' : 'top-[122px] sm:top-[130px]'
+          } left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 max-w-[95vw] overflow-x-auto text-xs animate-fade-in`}
+        >
+          <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200 text-slate-700 font-bold shrink-0">
+            <Type className="w-4 h-4 text-blue-600" />
+            <span className="hidden sm:inline">Text & Font</span>
+          </div>
+
+          {/* Font Family Selector */}
+          <div className="flex items-center gap-1 shrink-0">
+            <select
+              value={selectedAction?.kind === 'text' ? (selectedAction.fontFamily || activeFontFamily) : activeFontFamily}
+              onChange={(e) => handleUpdateTextProperty('fontFamily', e.target.value)}
+              className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="Inter, sans-serif">Inter Modern</option>
+              <option value="Segoe UI, Tahoma, sans-serif">Segoe UI Clean</option>
+              <option value="'Caveat', cursive">Caveat Handwriting</option>
+              <option value="'JetBrains Mono', monospace">JetBrains Mono Code</option>
+              <option value="'Playfair Display', serif">Playfair Serif</option>
+              <option value="'Kalam', cursive">Kalam Marker</option>
+              <option value="Arial, Helvetica, sans-serif">Arial Standard</option>
+              <option value="'Comic Sans MS', cursive, sans-serif">Comic Sans Casual</option>
+            </select>
+          </div>
+
+          {/* Font Size Selector */}
+          <div className="flex items-center gap-1 shrink-0">
+            <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">Size:</span>
+            <select
+              value={selectedAction?.kind === 'text' ? (selectedAction.fontSize || activeFontSize) : activeFontSize}
+              onChange={(e) => handleUpdateTextProperty('fontSize', Number(e.target.value))}
+              className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {[14, 16, 18, 20, 24, 28, 32, 40, 48, 64].map((sz) => (
+                <option key={sz} value={sz}>{sz}px</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Bold & Italic Toggles */}
+          <div className="flex items-center gap-1 pr-1.5 border-r border-slate-200 shrink-0">
+            <button
+              onClick={() => handleUpdateTextProperty('bold', !(selectedAction?.kind === 'text' ? selectedAction.bold : activeFontBold))}
+              title="Toggle Bold"
+              className={`p-1.5 rounded-lg transition ${
+                (selectedAction?.kind === 'text' ? selectedAction.bold : activeFontBold)
+                  ? 'bg-blue-600 text-white font-bold shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Bold className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => handleUpdateTextProperty('italic', !(selectedAction?.kind === 'text' ? selectedAction.italic : activeFontItalic))}
+              title="Toggle Italic"
+              className={`p-1.5 rounded-lg transition ${
+                (selectedAction?.kind === 'text' ? selectedAction.italic : activeFontItalic)
+                  ? 'bg-blue-600 text-white font-bold shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Italic className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Text Color Picker */}
+          <div className="flex items-center gap-1 shrink-0">
+            <input
+              type="color"
+              value={selectedAction?.kind === 'text' ? (selectedAction.color || strokeColor) : strokeColor}
+              onChange={(e) => handleUpdateTextProperty('color', e.target.value)}
+              title="Text Color"
+              className="w-5 h-5 rounded-full cursor-pointer bg-transparent border-0"
+            />
+          </div>
+
+          {/* If text box selected: Edit Content and Delete */}
+          {selectedAction && selectedAction.kind === 'text' && (
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-200 shrink-0">
+              <button
+                onClick={handleEditTextContent}
+                title="Edit text content (or double-click text on canvas)"
+                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg text-xs transition flex items-center gap-1"
+              >
+                <span>✎ Edit Text</span>
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                title="Delete this text element"
+                className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Background Infinite Grid Layer */}
       <canvas
@@ -2481,6 +2946,10 @@ export default function Whiteboard({
           setActiveShape(shapeId);
           setActiveTool('shape');
         }}
+        fillShape={fillShape}
+        setFillShape={setFillShape}
+        fillColor={fillColor}
+        setFillColor={setFillColor}
       />
 
       <ExportModal
@@ -2503,26 +2972,29 @@ export default function Whiteboard({
         isOpen={isMilestonesOpen}
         onClose={() => setIsMilestonesOpen(false)}
         milestones={milestones}
+        privateMilestones={privateMilestones}
         onSaveMilestone={handlePublishMilestone}
         onShowInstance={(ms) => {
           setViewingInstance({
             id: ms.id,
             title: ms.title,
-            actions: JSON.parse(JSON.stringify(ms.snapshot || []))
+            actions: JSON.parse(JSON.stringify(ms.snapshot || [])),
+            original_snapshot: JSON.parse(JSON.stringify(ms.original_snapshot || ms.snapshot || [])),
+            host_sandbox: ms.host_sandbox ? JSON.parse(JSON.stringify(ms.host_sandbox)) : null,
+            is_public: ms.is_public !== false
           });
+          setSandboxViewMode('sandbox');
           showNotification(`👁️ Sandboxed in instance "${ms.title}". Edits do not modify live canvas.`);
         }}
         onBroadcastShow={handleBroadcastShowInstance}
         onRestoreMilestone={(snapshot, title) => {
-          setViewingInstance(null);
-          setActions(snapshot || []);
-          if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'restore_milestone', actions: snapshot, title }));
-          }
-          showNotification(`🔄 Canvas restored to milestone "${title}"`);
+          handleRestoreMilestone(snapshot, title);
         }}
-        canRestore={isHost || isCohost || myPermissions.can_instances !== false}
+        onDeleteMilestone={handleDeleteMilestone}
+        canRestore={isHost}
         canSave={isHost || isCohost || myPermissions.can_instances !== false}
+        canSharePublic={isHost || myPermissions.can_instances !== false}
+        currentUserCode={user?.user_code}
         isHost={isHost}
       />
 
@@ -2530,10 +3002,12 @@ export default function Whiteboard({
         isOpen={isPublicWorksOpen}
         onClose={() => setIsPublicWorksOpen(false)}
         publicWorks={publicWorks}
-        onDeletePublicWork={handleDeletePublicWork}
+        privateWorks={privateScreenshots}
+        onDeleteWork={handleDeletePublicWork}
         currentUserCode={user?.user_code}
         isHost={isHost}
         canDelete={isHost || isCohost}
+        onOpenExportModal={() => setIsExportModalOpen(true)}
       />
 
       <AddMemberModal
@@ -2541,6 +3015,18 @@ export default function Whiteboard({
         onClose={() => setIsAddMemberOpen(false)}
         onAddMember={handleAddMember}
         connectedUsers={connectedUsers}
+      />
+
+      {/* Save Destination Modal (2 Options: Private Local vs Public Works) */}
+      <SaveDestinationModal
+        isOpen={Boolean(saveModalConfig)}
+        onClose={() => setSaveModalConfig(null)}
+        mode={saveModalConfig?.mode}
+        canSharePublic={saveModalConfig?.mode === 'screenshot'
+          ? (isHost || myPermissions.can_public_work !== false)
+          : (isHost || myPermissions.can_instances !== false)}
+        defaultTitle={saveModalConfig?.defaultTitle}
+        onConfirm={handleConfirmSaveDestination}
       />
 
       {/* Bottom Status Pill */}

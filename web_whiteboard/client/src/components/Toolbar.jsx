@@ -42,6 +42,10 @@ export default function Toolbar({
   setStrokeColor,
   strokeWidth,
   setStrokeWidth,
+  fillShape = false,
+  setFillShape,
+  fillColor = '#3b82f6',
+  setFillColor,
   gridMode = 'square',
   setGridMode,
   onCycleGrid,
@@ -60,7 +64,7 @@ export default function Toolbar({
   hasTopBanner = false
 }) {
   return (
-    <div className={`fixed ${hasTopBanner ? 'top-26 sm:top-28' : 'top-16 sm:top-18'} left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none transition-all duration-200`}>
+    <div className={`fixed ${hasTopBanner ? 'top-[106px] sm:top-[112px]' : 'top-16 sm:top-18'} left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 sm:gap-1.5 p-1.5 sm:p-2 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/80 max-w-[95vw] overflow-x-auto scrollbar-none transition-all duration-200`}>
       
       {/* Blocked indicator if Host disabled drawing */}
       {!canDraw && (
@@ -141,6 +145,7 @@ export default function Toolbar({
 
       {/* Shapes & Objects */}
       <div className="relative flex items-center gap-1 pr-1.5 border-r border-slate-200">
+        {/* Shape Picker Button */}
         <button
           disabled={!canDraw}
           onClick={() => {
@@ -159,6 +164,23 @@ export default function Toolbar({
             const Icon = shapeObj?.icon || Square;
             return <Icon className="w-4 h-4" />;
           })()}
+        </button>
+
+        {/* Fill Shape Toggle */}
+        <button
+          disabled={!canDraw}
+          onClick={() => setFillShape && setFillShape(!fillShape)}
+          title={fillShape ? `Fill Shape: ON (${fillColor})` : 'Fill Shape: OFF (Outline only)'}
+          className={`p-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+            !canDraw ? 'opacity-40 cursor-not-allowed' :
+            fillShape ? 'bg-blue-100 text-blue-700 ring-1 ring-blue-300' : 'text-slate-500 hover:bg-slate-100'
+          }`}
+        >
+          <div
+            style={{ backgroundColor: fillShape ? fillColor : 'transparent' }}
+            className="w-3.5 h-3.5 rounded border border-slate-400 shrink-0"
+          />
+          <span className="hidden md:inline text-[10px]">Fill</span>
         </button>
 
         {/* Table Tool */}
@@ -218,9 +240,12 @@ export default function Toolbar({
       {/* Grid Style Cycler (1-Click Cycle: Square -> Dot -> Ruled -> None) */}
       <div className="pr-1.5 border-r border-slate-200">
         <button
+          disabled={!canDraw}
           onClick={onCycleGrid}
-          title={`Canvas Grid: ${gridMode.toUpperCase()} (Click to cycle None / Square / Dot / Ruled)`}
-          className="px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition"
+          title={canDraw ? `Canvas Grid: ${gridMode.toUpperCase()} (Click to cycle None / Square / Dot / Ruled)` : 'Canvas grid changes restricted by Host'}
+          className={`px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold transition ${
+            !canDraw ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+          }`}
         >
           <Grid3X3 className="w-4 h-4 text-blue-600" />
           <span className="capitalize">{gridMode}</span>

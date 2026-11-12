@@ -303,9 +303,7 @@ export default function Hub({
       <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-30 shadow-sm">
         {/* Left Brand */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md">
-            <Layers className="w-5 h-5" />
-          </div>
+          <img src="/logo.png" className="w-9 h-9 rounded-xl object-contain shadow-sm bg-white p-0.5 border border-slate-200" alt="Whiteboard Logo" />
           <div>
             <h1 className="font-extrabold text-base text-slate-900 tracking-tight flex items-center gap-2">
               Whiteboard Logs & Workspace
