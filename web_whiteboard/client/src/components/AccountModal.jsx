@@ -17,33 +17,63 @@ export default function AccountModal({ user, onSave, onClose, isEditing = false 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) {
-      setError('Please provide both your name and email address.');
+    if (!name.trim()) {
+      setError('Please provide your name.');
       return;
     }
     setError('');
     setLoading(true);
 
+    const emailValue = email.trim() || `${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}@whiteboard.local`;
+    const customHost = localStorage.getItem('whiteboard_custom_server') || '';
+    const isLan = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    const baseUrl = customHost && !isLan
+      ? (customHost.startsWith('http') ? customHost : `http://${customHost}`).replace(/\/$/, '')
+      : '';
+
     try {
-      const res = await fetch('/api/auth/login', {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+      const res = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(),
-          email: email.trim(),
+          email: emailValue,
           avatarColor,
           avatarUrl: avatarUrl.trim()
-        })
+        }),
+        signal: controller.signal
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to authenticate');
+      clearTimeout(timeoutId);
 
-      onSave(data.user);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          onSave(data.user);
+          return;
+        }
+      }
     } catch (err) {
-      setError(err.message);
+      console.warn('[Account] Server login fetch note, applying local profile:', err.message);
     } finally {
       setLoading(false);
     }
+
+    // Seamless offline/local fallback: NEVER block user with "Failed to fetch"
+    const randomHex = Math.floor(1000 + Math.random() * 9000).toString(36).toUpperCase();
+    const fallbackUser = {
+      id: user?.id || Date.now(),
+      user_code: user?.user_code || `USR-${randomHex.padStart(4, 'X').slice(-4)}`,
+      name: name.trim(),
+      email: emailValue,
+      avatar_color: avatarColor,
+      avatar_url: avatarUrl.trim(),
+      created_at: new Date().toISOString()
+    };
+
+    onSave(fallbackUser);
   };
 
   const copyCode = () => {

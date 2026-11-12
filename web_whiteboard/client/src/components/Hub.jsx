@@ -214,18 +214,36 @@ export default function Hub({
         console.warn('Network info unavailable:', e);
       }
 
-      const res = await fetch('/api/rooms/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      let createdRoom = null;
+      try {
+        const res = await fetch('/api/rooms/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title.trim(),
+            hostUserCode: user?.user_code || 'GUEST',
+            hostName: user?.name || 'User',
+            isPublic: true
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.room) createdRoom = data.room;
+        }
+      } catch (e) {
+        console.warn('Backend room creation note, using local room:', e);
+      }
+
+      if (!createdRoom) {
+        const randCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+        createdRoom = {
+          code: randCode,
           title: title.trim(),
-          hostUserCode: user.user_code,
-          hostName: user.name,
-          isPublic: true
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create room');
+          host_user_code: user?.user_code || 'GUEST',
+          host_name: user?.name || 'User',
+          created_at: new Date().toISOString()
+        };
+      }
 
       if (mode === 'hotspot') {
         const adapters = netInfo?.adapters || [];
@@ -239,14 +257,14 @@ export default function Hub({
 
         setLanModalData({
           mode: 'hotspot',
-          title: data.room.title,
-          code: data.room.code,
+          title: createdRoom.title,
+          code: createdRoom.code,
           adapters,
           selectedAdapter: primary,
-          room: data.room
+          room: createdRoom
         });
       } else {
-        onOpenBoard({ room: data.room, isOffline: false });
+        onOpenBoard({ room: createdRoom, isOffline: false });
       }
     } catch (err) {
       alert(`Error creating room: ${err.message}`);
