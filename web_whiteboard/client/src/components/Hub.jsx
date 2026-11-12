@@ -469,51 +469,34 @@ export default function Hub({
       <main className="flex-1 max-w-6xl w-full mx-auto px-6 pb-12">
         {currentTab === 'group' ? (
           <div className="space-y-8">
-            {/* Section 1: 3 Hosting Options */}
-            <div className="bg-white border-2 border-slate-900 rounded-2xl p-6 shadow-sm">
-              <h2 className="text-base font-bold text-slate-900">Create Group Whiteboard</h2>
-              <p className="text-xs text-slate-500 mt-0.5 mb-4">
-                Choose your network connection mode to host a collaborative session:
+            {/* Section 1: Hosting Options */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
+              <h2 className="text-base font-bold text-slate-900">Host a Whiteboard</h2>
+              <p className="text-xs text-slate-500 mt-0.5 mb-5">
+                Start a live session for your team:
               </p>
-
-              {netInfo?.primary_ip && (
-                <div className="mb-5 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2.5 text-emerald-950 font-medium">
-                    <span className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-sm"><Wifi className="w-4 h-4" /></span>
-                    <div>
-                      <p className="font-bold text-emerald-900">Your LAN / Wi-Fi Address for Partners:</p>
-                      <p className="font-mono text-emerald-700 font-bold text-sm tracking-wide">http://{netInfo.primary_ip}:5000</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[11px] text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">
-                      Share this URL with friends on the same Wi-Fi (Do NOT use 'localhost')
-                    </span>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Option 1: Cloud & Internet Mode */}
-                <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/50 flex flex-col justify-between hover:shadow-md transition">
+                <div className="p-5 rounded-2xl border border-blue-100 bg-blue-50/30 flex flex-col justify-between hover:shadow-xs transition">
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="p-2.5 rounded-xl bg-blue-600 text-white shadow-sm">
+                      <span className="p-2.5 rounded-xl bg-blue-600 text-white shadow-xs">
                         <Globe className="w-5 h-5" />
                       </span>
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-blue-200 text-blue-900 rounded-full">
-                        Mobile + Wi-Fi
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full">
+                        Worldwide
                       </span>
                     </div>
                     <h3 className="font-bold text-sm text-slate-900">1. With Internet</h3>
-                    <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                      Connect nodes across cellular mobile networks (4G/5G) and home/office Wi-Fi worldwide.
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Connect across mobile data (4G/5G), home Wi-Fi, or remote networks globally.
                     </p>
                   </div>
                   <button
                     disabled={loading}
                     onClick={() => handleCreateGroupRoom('cloud')}
-                    className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1.5"
+                    className="mt-5 w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5"
                   >
                     <Plus className="w-4 h-4" />
                     Host on Internet
@@ -521,39 +504,39 @@ export default function Hub({
                 </div>
 
                 {/* Option 2: Without Internet (Direct Hotspot) */}
-                <div className="p-5 rounded-2xl border border-emerald-200 bg-emerald-50/50 flex flex-col justify-between hover:shadow-md transition">
+                <div className="p-5 rounded-2xl border border-emerald-100 bg-emerald-50/30 flex flex-col justify-between hover:shadow-xs transition">
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <span className="p-2.5 rounded-xl bg-emerald-600 text-white shadow-sm">
+                      <span className="p-2.5 rounded-xl bg-emerald-600 text-white shadow-xs">
                         <Wifi className="w-5 h-5" />
                       </span>
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-200 text-emerald-900 rounded-full">
-                        Zero Internet
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                        Local Only
                       </span>
                     </div>
                     <h3 className="font-bold text-sm text-slate-900">2. Without Internet</h3>
-                    <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                      Peer-to-peer over local Wi-Fi router or Mobile Hotspot with NO active internet connection.
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                      Peer-to-peer over your local Wi-Fi router or Mobile Hotspot with zero internet needed.
                     </p>
                   </div>
                   <button
                     disabled={loading}
                     onClick={() => handleCreateGroupRoom('hotspot')}
-                    className="mt-5 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1.5"
+                    className="mt-5 w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5"
                   >
                     <Plus className="w-4 h-4" />
-                    1-Click Host Hotspot
+                    Host on Local LAN
                   </button>
                 </div>
               </div>
             </div>
 
             {/* Section 2: Join Active Room */}
-            <div className="bg-white border-2 border-slate-900 rounded-2xl p-6 shadow-sm flex flex-col gap-3">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col gap-3">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
-                  <h3 className="font-bold text-sm text-slate-900">Join Existing Whiteboard</h3>
-                  <p className="text-xs text-slate-500">Enter 4-letter room code (LAN) or paste Public Link (Internet):</p>
+                  <h3 className="font-bold text-sm text-slate-900">Join Whiteboard</h3>
+                  <p className="text-xs text-slate-500">Enter 4-letter room code or paste invite link:</p>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                   <input
@@ -901,14 +884,9 @@ export default function Hub({
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-600 space-y-1.5 bg-blue-50/40 p-3.5 rounded-xl border border-blue-100">
-                    <p className="font-bold text-blue-950 text-xs">How Anyone Connects Worldwide:</p>
-                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-blue-900">
-                      <li>Copy and send the <strong>Public Share Link</strong> to your collaborator anywhere in the world.</li>
-                      <li>They can open the link in <strong>any web browser</strong> or paste it into the Desktop App's join box.</li>
-                      <li>Connects across mobile cellular data (4G/5G), home broadband, or college networks seamlessly!</li>
-                    </ol>
-                  </div>
+                  <p className="text-xs text-slate-500 font-medium px-1">
+                    Share this link or room code with your teammates to collaborate in real-time from any network.
+                  </p>
 
                   <div className="flex justify-end pt-2">
                     <button
@@ -1014,14 +992,9 @@ export default function Hub({
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-600 space-y-1.5 bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100">
-                    <p className="font-bold text-emerald-950 text-xs">How Partners Connect on the Same LAN:</p>
-                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-emerald-900">
-                      <li>Connect their mobile phone, tablet, or laptop to this <strong>SAME Wi-Fi router or Mobile Hotspot ({lanModalData.selectedAdapter?.interface || 'Local Wi-Fi'})</strong>.</li>
-                      <li>Ensure both devices are on this local network (zero internet needed).</li>
-                      <li>On their laptop, open the Desktop App and click <strong>"Scan Same LAN"</strong> or type room code <strong className="font-mono">{lanModalData.code}</strong>!</li>
-                    </ol>
-                  </div>
+                  <p className="text-xs text-slate-500 font-medium px-1">
+                    Collaborators on the same Wi-Fi or Mobile Hotspot can click "Scan Same LAN" or enter this code.
+                  </p>
 
                   <div className="flex justify-end pt-2">
                     <button

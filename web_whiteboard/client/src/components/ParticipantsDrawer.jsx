@@ -44,6 +44,143 @@ export default function ParticipantsDrawer({
 
   const canManage = isHost || isCohost;
   const onlineCount = members.filter(m => m.online).length;
+  const onlineMembers = members.filter(m => m.online);
+  const offlineMembers = members.filter(m => !m.online);
+
+  const renderMemberCard = (m) => {
+    const isMe = m.user_code === currentUserCode;
+    const isTargetHost = m.role === 'host';
+    const isTargetCohost = m.role === 'cohost';
+
+    return (
+      <div
+        key={m.user_code}
+        className={`p-2.5 rounded-xl border flex flex-col gap-2 transition ${
+          isMe
+            ? 'bg-blue-50/50 border-blue-200'
+            : m.online
+            ? 'bg-white border-slate-200 shadow-2xs hover:border-slate-300'
+            : 'bg-slate-50/60 border-slate-200/60 opacity-70 hover:opacity-100'
+        }`}
+      >
+        {/* Member Top Row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative shrink-0">
+              <div
+                style={{ backgroundColor: m.avatar_color || '#2563eb' }}
+                className="w-7 h-7 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-2xs"
+              >
+                {m.name?.slice(0, 2).toUpperCase() || 'U'}
+              </div>
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
+                  m.online ? 'bg-emerald-500 ring-1 ring-emerald-300' : 'bg-slate-300'
+                }`}
+              />
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className={`font-bold text-xs truncate ${m.online ? 'text-slate-800' : 'text-slate-500'}`}>
+                  {m.name} {isMe && '(You)'}
+                </span>
+                {isTargetHost ? (
+                  <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold text-[9px] rounded shrink-0">
+                    Host
+                  </span>
+                ) : isTargetCohost ? (
+                  <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold text-[9px] rounded flex items-center gap-0.5 shrink-0">
+                    <Star className="w-2.5 h-2.5 fill-purple-700" />
+                    Co-host
+                  </span>
+                ) : null}
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                {m.user_code} {m.online ? '· active' : '· offline'}
+              </p>
+            </div>
+          </div>
+
+          {/* Host Actions: Promote Co-host / Kick */}
+          {isHost && !isTargetHost && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onPromoteCohost(m.user_code, !isTargetCohost)}
+                title={isTargetCohost ? 'Remove Co-host' : 'Promote to Co-host'}
+                className={`p-1.5 rounded-lg text-xs transition ${
+                  isTargetCohost
+                    ? 'text-purple-600 bg-purple-50'
+                    : 'text-slate-400 hover:text-purple-600 hover:bg-slate-100'
+                }`}
+              >
+                <Star className={`w-3.5 h-3.5 ${isTargetCohost ? 'fill-purple-600' : ''}`} />
+              </button>
+
+              <button
+                onClick={() => onKickMember(m.user_code)}
+                title="Remove member from room"
+                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+              >
+                <UserMinus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Granular Permission Toggles (When policy is 'Selected' or for Host customization) */}
+        {!isTargetHost && (
+          <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px]">
+            <span className="text-slate-400 font-medium">Access:</span>
+
+            <div className="flex items-center gap-1">
+              {/* Canva Draw Toggle */}
+              <button
+                disabled={!isHost || canvaPerm !== 'selected'}
+                onClick={() => {
+                  if (!isHost || canvaPerm !== 'selected') return;
+                  if (onUpdateMemberCustomPermissions) {
+                    onUpdateMemberCustomPermissions(m.user_code, { can_draw: !m.can_draw });
+                  } else if (onToggleDraw) {
+                    onToggleDraw(m.user_code, m.can_draw ? 0 : 1);
+                  }
+                }}
+                title={`Canvas Drawing: ${m.can_draw ? 'Allowed' : 'Blocked'}`}
+                className={`px-1.5 py-0.5 rounded font-semibold flex items-center gap-1 transition ${
+                  m.can_draw
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-red-100 text-red-700'
+                } ${isHost && canvaPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+              >
+                <Pencil className="w-2.5 h-2.5" />
+                <span>Draw</span>
+              </button>
+
+              {/* Chat Toggle */}
+              <button
+                disabled={!isHost || chatPerm !== 'selected'}
+                onClick={() => {
+                  if (!isHost || chatPerm !== 'selected') return;
+                  if (onUpdateMemberCustomPermissions) {
+                    onUpdateMemberCustomPermissions(m.user_code, { can_chat: !m.can_chat });
+                  }
+                }}
+                title={`Chat: ${m.can_chat ? 'Allowed' : 'Blocked'}`}
+                className={`px-1.5 py-0.5 rounded font-semibold flex items-center gap-1 transition ${
+                  m.can_chat
+                    ? 'bg-indigo-100 text-indigo-800'
+                    : 'bg-slate-200 text-slate-500'
+                } ${isHost && chatPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
+              >
+                <MessageSquare className="w-2.5 h-2.5" />
+                <span>Chat</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const canvaPerm = room?.canva_perm || 'everyone'; // 'everyone' | 'selected' | 'host_only'
   const chatPerm = room?.chat_perm || room?.chat_permission || 'everyone';
@@ -169,178 +306,35 @@ export default function ParticipantsDrawer({
         </div>
       )}
 
-      {/* Participants List */}
-      <div className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
-        {members.map((m) => {
-          const isMe = m.user_code === currentUserCode;
-          const isTargetHost = m.role === 'host';
-          const isTargetCohost = m.role === 'cohost';
-
-          return (
-            <div
-              key={m.user_code}
-              className={`p-3 rounded-xl border flex flex-col gap-2 transition ${
-                isMe ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50/70 border-slate-200 hover:bg-white'
-              }`}
-            >
-              {/* Member Top Row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="relative shrink-0">
-                    <div
-                      style={{ backgroundColor: m.avatar_color || '#2563eb' }}
-                      className="w-8 h-8 rounded-full text-white flex items-center justify-center font-bold text-xs shadow-sm"
-                    >
-                      {m.name?.slice(0, 2).toUpperCase() || 'U'}
-                    </div>
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-white ${
-                        m.online ? 'bg-green-500' : 'bg-slate-400'
-                      }`}
-                    />
-                  </div>
-
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-xs text-slate-800 truncate">
-                        {m.name} {isMe && '(You)'}
-                      </span>
-                      {isTargetHost ? (
-                        <span className="px-1.5 py-0.2 bg-amber-100 text-amber-800 font-bold text-[9px] rounded shrink-0">
-                          Host
-                        </span>
-                      ) : isTargetCohost ? (
-                        <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 font-bold text-[9px] rounded flex items-center gap-0.5 shrink-0">
-                          <Star className="w-2.5 h-2.5 fill-purple-700" />
-                          Co-host
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-mono">
-                      {m.user_code} {!m.online && '· offline'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Host Actions: Promote Co-host / Kick */}
-                {isHost && !isTargetHost && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => onPromoteCohost(m.user_code, !isTargetCohost)}
-                      title={isTargetCohost ? 'Remove Co-host' : 'Promote to Co-host'}
-                      className={`p-1.5 rounded-lg text-xs transition ${
-                        isTargetCohost
-                          ? 'text-purple-600 bg-purple-50'
-                          : 'text-slate-400 hover:text-purple-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      <Star className={`w-3.5 h-3.5 ${isTargetCohost ? 'fill-purple-600' : ''}`} />
-                    </button>
-
-                    <button
-                      onClick={() => onKickMember(m.user_code)}
-                      title="Remove member from room"
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                    >
-                      <UserMinus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Granular Permission Toggles (When policy is 'Selected' or for Host customization) */}
-              {!isTargetHost && (
-                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
-                  <span className="text-slate-400 font-medium">Access:</span>
-
-                  <div className="flex items-center gap-1">
-                    {/* Canva Draw Toggle */}
-                    <button
-                      disabled={!isHost || canvaPerm !== 'selected'}
-                      onClick={() => {
-                        if (!isHost || canvaPerm !== 'selected') return;
-                        if (onUpdateMemberCustomPermissions) {
-                          onUpdateMemberCustomPermissions(m.user_code, { can_draw: !m.can_draw });
-                        } else if (onToggleDraw) {
-                          onToggleDraw(m.user_code, m.can_draw ? 0 : 1);
-                        }
-                      }}
-                      title={`Canvas Drawing: ${m.can_draw ? 'Allowed' : 'Blocked'}${canvaPerm !== 'selected' ? ` (Controlled by policy: ${canvaPerm})` : ' (Click to toggle)'}`}
-                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
-                        m.can_draw
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-red-100 text-red-700'
-                      } ${isHost && canvaPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
-                    >
-                      <Pencil className="w-2.5 h-2.5" />
-                      <span>Draw</span>
-                    </button>
-
-                    {/* Chat Toggle */}
-                    <button
-                      disabled={!isHost || chatPerm !== 'selected'}
-                      onClick={() => {
-                        if (!isHost || chatPerm !== 'selected') return;
-                        if (onUpdateMemberCustomPermissions) {
-                          onUpdateMemberCustomPermissions(m.user_code, { can_chat: !m.can_chat });
-                        }
-                      }}
-                      title={`Chatbox: ${m.can_chat ? 'Allowed' : 'Blocked'}${chatPerm !== 'selected' ? ` (Controlled by policy: ${chatPerm})` : ' (Click to toggle)'}`}
-                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
-                        m.can_chat
-                          ? 'bg-indigo-100 text-indigo-800'
-                          : 'bg-slate-200 text-slate-500'
-                      } ${isHost && chatPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
-                    >
-                      <MessageSquare className="w-2.5 h-2.5" />
-                      <span>Chat</span>
-                    </button>
-
-                    {/* Instances Toggle */}
-                    <button
-                      disabled={!isHost || instancesPerm !== 'selected'}
-                      onClick={() => {
-                        if (!isHost || instancesPerm !== 'selected') return;
-                        if (onUpdateMemberCustomPermissions) {
-                          onUpdateMemberCustomPermissions(m.user_code, { can_instances: !m.can_instances });
-                        }
-                      }}
-                      title={`Instances Management: ${m.can_instances ? 'Allowed' : 'Blocked'}${instancesPerm !== 'selected' ? ` (Controlled by policy: ${instancesPerm})` : ' (Click to toggle)'}`}
-                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
-                        m.can_instances
-                          ? 'bg-teal-100 text-teal-800'
-                          : 'bg-slate-200 text-slate-500'
-                      } ${isHost && instancesPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
-                    >
-                      <History className="w-2.5 h-2.5" />
-                      <span>Instances</span>
-                    </button>
-
-                    {/* Public Work Toggle */}
-                    <button
-                      disabled={!isHost || publicWorkPerm !== 'selected'}
-                      onClick={() => {
-                        if (!isHost || publicWorkPerm !== 'selected') return;
-                        if (onUpdateMemberCustomPermissions) {
-                          onUpdateMemberCustomPermissions(m.user_code, { can_public_work: !m.can_public_work });
-                        }
-                      }}
-                      title={`Public Works: ${m.can_public_work ? 'Allowed' : 'Blocked'}${publicWorkPerm !== 'selected' ? ` (Controlled by policy: ${publicWorkPerm})` : ' (Click to toggle)'}`}
-                      className={`px-2 py-0.5 rounded-md font-semibold flex items-center gap-1 transition ${
-                        m.can_public_work
-                          ? 'bg-violet-100 text-violet-800'
-                          : 'bg-slate-200 text-slate-500'
-                      } ${isHost && publicWorkPerm === 'selected' ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-90'}`}
-                    >
-                      <Image className="w-2.5 h-2.5" />
-                      <span>Works</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+      {/* Participants List (Discord Style: Online vs Offline) */}
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
+        {/* ONLINE GROUP */}
+        {onlineMembers.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider px-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block shadow-xs animate-pulse"></span>
+              <span>Online &bull; {onlineMembers.length}</span>
             </div>
-          );
-        })}
+            {onlineMembers.map(m => renderMemberCard(m))}
+          </div>
+        )}
+
+        {/* OFFLINE GROUP */}
+        {offlineMembers.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center gap-1.5 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider px-1">
+              <span className="w-2 h-2 rounded-full bg-slate-300 inline-block"></span>
+              <span>Offline &bull; {offlineMembers.length}</span>
+            </div>
+            {offlineMembers.map(m => renderMemberCard(m))}
+          </div>
+        )}
+
+        {members.length === 0 && (
+          <div className="p-6 text-center text-xs text-slate-400">
+            No participants recorded in this session yet.
+          </div>
+        )}
       </div>
 
       {/* Selected Members Dialog Box */}

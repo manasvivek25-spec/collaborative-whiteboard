@@ -23,6 +23,7 @@ export default function App() {
     return localStorage.getItem('whiteboard_custom_server') || '';
   });
   const [noticeModal, setNoticeModal] = useState(null); // { title, message, type }
+  const [activeSocket, setActiveSocket] = useState(null);
 
   const showNotice = (title, message, type = 'info') => {
     setNoticeModal({ title, message, type });
@@ -36,7 +37,8 @@ export default function App() {
     const roomParam = params.get('room');
     const offlineParam = params.get('offline');
     if (offlineParam) {
-      const defaultUser = user || { user_code: 'U_DEMO', name: 'Manas Vivek', avatar_color: '#3b82f6' };
+      const randCode = 'USR-' + Math.random().toString(36).substring(2, 6).toUpperCase();
+      const defaultUser = user || { user_code: randCode, name: 'User', avatar_color: '#3b82f6' };
       if (!user) {
         setUser(defaultUser);
         try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
@@ -58,54 +60,102 @@ export default function App() {
     }
   }, []);
 
-  // ── WEBSOCKET CONNECTION & USER PRESENCE ───────────────────────────
+  // ── WEBSOCKET CONNECTION, RESILIENT RECONNECT & USER PRESENCE ──────
   useEffect(() => {
     if (!user?.user_code) return;
 
-    let wsUrl = '';
-    const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-    if (customServerHost && !isLoadedFromLanHost) {
-      const cleanHost = customServerHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      const isHttps = customServerHost.startsWith('https://');
-      wsUrl = `${isHttps ? 'wss:' : 'ws:'}//${cleanHost}`;
-    } else {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      wsUrl = `${protocol}//${host}`;
-    }
+    let isSubscribed = true;
+    let reconnectTimeout = null;
+    let pingInterval = null;
+    let currentSocket = null;
 
-    let socket = null;
-    try {
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
+    const connect = () => {
+      if (!isSubscribed) return;
 
-      socket.onopen = () => {
-        socket.send(JSON.stringify({
-          type: 'identify',
-          user_code: user.user_code,
-          user_name: user.name,
-          avatar_color: user.avatar_color
-        }));
-      };
+      let wsUrl = '';
+      const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      if (customServerHost && !isLoadedFromLanHost) {
+        const cleanHost = customServerHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const isHttps = customServerHost.startsWith('https://');
+        wsUrl = `${isHttps ? 'wss:' : 'ws:'}//${cleanHost}`;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        wsUrl = `${protocol}//${host}`;
+      }
 
-      socket.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'room_invite') {
-            setRoomInvite(msg);
+      try {
+        const socket = new WebSocket(wsUrl);
+        currentSocket = socket;
+        wsRef.current = socket;
+
+        socket.onopen = () => {
+          if (!isSubscribed) {
+            socket.close();
+            return;
           }
-        } catch (err) {
-          console.error(err);
+          setActiveSocket(socket);
+
+          // Identify user on server
+          socket.send(JSON.stringify({
+            type: 'identify',
+            user_code: user.user_code,
+            user_name: user.name,
+            avatar_color: user.avatar_color
+          }));
+
+          // Start client-side keepalive ping every 20 seconds
+          if (pingInterval) clearInterval(pingInterval);
+          pingInterval = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ type: 'heartbeat' }));
+            }
+          }, 20000);
+        };
+
+        socket.onmessage = (e) => {
+          try {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'room_invite') {
+              setRoomInvite(msg);
+            }
+          } catch (err) {
+            console.error(err);
+          }
+        };
+
+        socket.onclose = () => {
+          if (pingInterval) clearInterval(pingInterval);
+          if (isSubscribed) {
+            setActiveSocket(null);
+            // Auto-reconnect with 1.5s delay
+            reconnectTimeout = setTimeout(connect, 1500);
+          }
+        };
+
+        socket.onerror = () => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close();
+          }
+        };
+      } catch (err) {
+        console.warn('[!] WebSocket init error:', err);
+        if (isSubscribed) {
+          reconnectTimeout = setTimeout(connect, 2000);
         }
-      };
-    } catch (err) {
-      console.error('[!] WebSocket connection error:', err);
-    }
+      }
+    };
+
+    connect();
 
     return () => {
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.close();
+      isSubscribed = false;
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (pingInterval) clearInterval(pingInterval);
+      if (currentSocket && (currentSocket.readyState === WebSocket.OPEN || currentSocket.readyState === WebSocket.CONNECTING)) {
+        currentSocket.close();
       }
+      setActiveSocket(null);
     };
   }, [user, customServerHost]);
 
@@ -288,7 +338,7 @@ export default function App() {
           room={activeRoom}
           user={user}
           onBackToHub={() => setCurrentView('hub')}
-          ws={isOfflineBoard ? null : wsRef.current}
+          ws={isOfflineBoard ? null : activeSocket}
           isOffline={isOfflineBoard}
         />
       )}

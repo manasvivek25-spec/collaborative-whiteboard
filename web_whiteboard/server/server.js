@@ -409,7 +409,8 @@ app.get('/api/rooms/:code', (req, res) => {
     const room = db.getRoom(code);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const members = db.getRoomMembers(code);
+    const rawMembers = db.getRoomMembers(code);
+    const members = getOnlineStatusMembers(code, rawMembers, room);
     const actions = db.getRoomActions(code);
     const chat = db.getChatHistory(code);
     const milestones = db.getRoomMilestones(code);
@@ -478,6 +479,11 @@ function sendToUser(userCode, msg) {
 wss.on('connection', (ws, req) => {
   const clientIp = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress || '127.0.0.1';
 
+  ws.isAlive = true;
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   wsMeta.set(ws, {
     user_code: null,
     user_name: 'Guest',
@@ -500,11 +506,36 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Periodic server heartbeat to keep connections active through routers & localtunnel
+const serverHeartbeat = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      handleWsDisconnect(ws);
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    try {
+      ws.ping();
+    } catch (e) {}
+  });
+}, 25000);
+
+wss.on('close', () => {
+  clearInterval(serverHeartbeat);
+});
+
 function handleWsMessage(ws, msg) {
+  ws.isAlive = true;
   const meta = wsMeta.get(ws) || {};
   const type = msg.type;
 
   switch (type) {
+    case 'heartbeat':
+    case 'ping': {
+      ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+      break;
+    }
+
     // 1. Identify client with User Code
     case 'identify': {
       const userCode = msg.user_code?.trim().toUpperCase();

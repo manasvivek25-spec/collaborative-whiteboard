@@ -24,7 +24,7 @@ export default function AccountModal({ user, onSave, onClose, isEditing = false 
     setError('');
     setLoading(true);
 
-    const emailValue = email.trim() || `${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '')}@whiteboard.local`;
+    const emailValue = email.trim() || `${name.trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'user'}@whiteboard.local`;
     const customHost = localStorage.getItem('whiteboard_custom_server') || '';
     const isLan = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
     const baseUrl = customHost && !isLan
@@ -141,7 +141,7 @@ export default function AccountModal({ user, onSave, onClose, isEditing = false 
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Manas, Hari"
+                placeholder="Enter your name"
                 className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

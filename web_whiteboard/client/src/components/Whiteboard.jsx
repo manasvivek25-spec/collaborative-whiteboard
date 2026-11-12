@@ -114,37 +114,9 @@ export default function Whiteboard({
 
   // Room & Peer State
   const [roomData, setRoomData] = useState(room);
-  const [members, setMembers] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.get('demo') === 'true') {
-        return [
-          { user_code: 'USR-HOST', name: 'Manas Vivek', role: 'host', online: true, can_draw: 1, can_chat: 1, can_instances: 1, can_public_work: 1 },
-          { user_code: 'USR-A1', name: 'Anirudh', role: 'member', online: true, can_draw: 1, can_chat: 1, can_instances: 1, can_public_work: 0 },
-          { user_code: 'USR-K2', name: 'Krishna Chaitanya', role: 'member', online: true, can_draw: 1, can_chat: 1, can_instances: 0, can_public_work: 0 },
-          { user_code: 'USR-H3', name: 'Harish', role: 'member', online: true, can_draw: 0, can_chat: 1, can_instances: 0, can_public_work: 0 }
-        ];
-      }
-    } catch(e) {}
-    return [];
-  });
+  const [members, setMembers] = useState(() => room?.members || []);
   const [remoteCursors, setRemoteCursors] = useState(new Map());
   const [actions, setActions] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.get('demo') === 'true') {
-        return [
-          { id: 'd1', kind: 'stroke', points: [[200, 180], [220, 220], [280, 250], [350, 250], [420, 230]], color: '#2563eb', width: 4, brush: 'pencil' },
-          { id: 'd2', kind: 'rect', x: 180, y: 300, w: 240, h: 140, color: '#3b82f6', width: 2.5, fill: '#eff6ff' },
-          { id: 'd3', kind: 'circle', x: 520, y: 300, w: 160, h: 160, color: '#10b981', width: 2.5, fill: '#ecfdf5' },
-          { id: 'd4', kind: 'arrow', x1: 425, y1: 370, x2: 515, y2: 370, color: '#6366f1', width: 3 },
-          { id: 'd5', kind: 'text', text: 'Central Server Engine\nNode.js + WebSockets', x: 200, y: 350, color: '#1e3a8a', fontSize: 18, fontFamily: 'Inter, sans-serif', bold: true },
-          { id: 'd6', kind: 'text', text: 'Peer Client\nReact 18 Canvas', x: 535, y: 370, color: '#065f46', fontSize: 18, fontFamily: 'Inter, sans-serif', bold: true },
-          { id: 'd7', kind: 'sticky', text: '⭐ RBAC Governance:\nHost Only | Selected | All\nSub-5ms Sync Latency!', x: 740, y: 220, w: 220, h: 140, bgColor: '#fef08a' },
-          { id: 'd8', kind: 'table', x0: 180, y0: 480, x1: 680, y1: 670, rows: 3, cols: 3, color: '#334155', width: 2, fill: '#ffffff', cells: { '0,0': 'Protocol', '0,1': 'Port', '0,2': 'Latency', '1,0': 'TCP Sockets', '1,1': '5050', '1,2': '< 5 ms', '2,0': 'WebSocket', '2,1': '5000', '2,2': '< 8 ms' } }
-        ];
-      }
-    } catch(e) {}
     if (isOffline && room?.code) {
       try {
         const cached = localStorage.getItem(`offline_actions_${room.code}`);
@@ -156,20 +128,7 @@ export default function Whiteboard({
     return room?.actions || [];
   });
   const [redoStack, setRedoStack] = useState([]);
-  const [chatMessages, setChatMessages] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.search);
-      if (p.get('demo') === 'true') {
-        return [
-          { id: 'c1', sender_name: 'Anirudh', avatar_color: '#38bdf8', message: 'WebSocket daemon active on port 5000.', timestamp: '10:15 AM' },
-          { id: 'c2', sender_name: 'Krishna Chaitanya', avatar_color: '#10b981', message: 'Vector stroke rendering pipeline synchronized.', timestamp: '10:16 AM' },
-          { id: 'c3', sender_name: 'Manas Vivek (Host)', avatar_color: '#ec4899', message: 'Canvas governance policy updated to Selected Members.', timestamp: '10:18 AM' },
-          { id: 'c4', sender_name: 'Harish', avatar_color: '#f59e0b', message: 'Database state snapshot and milestones saved!', timestamp: '10:19 AM' }
-        ];
-      }
-    } catch(e) {}
-    return [];
-  });
+  const [chatMessages, setChatMessages] = useState(() => room?.chat || []);
   const [milestones, setMilestones] = useState(() => {
     if (room?.milestones && Array.isArray(room.milestones)) return room.milestones;
     if (isOffline && room?.code) {
