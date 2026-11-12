@@ -17,12 +17,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
+import dgram from 'node:dgram';
 import db from './database.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 5000;
+const DISCOVERY_PORT = 45455;
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
@@ -38,6 +40,135 @@ const userSockets = new Map();
 // ws -> { user_code, user_name, room_code, avatar_color, ip }
 const wsMeta = new WeakMap();
 
+/**
+ * Detects real physical network adapters (Wi-Fi, Mobile Hotspot, Ethernet LAN).
+ * Strictly filters out virtual/internal software interfaces (WSL, Hyper-V, VirtualBox, Docker, etc.)
+ * Computes exact CIDR subnet and broadcast addresses for LAN discovery.
+ */
+function getValidPhysicalAdapters() {
+  const interfaces = os.networkInterfaces();
+  const valid = [];
+  const virtualRegex = /(vethernet|hyper-v|wsl|virtualbox|vmware|loopback|bluetooth|docker|tailscale|zerotier|hamachi|tap|tun|teredo|npcap|pseudo)/i;
+
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    if (!addrs || virtualRegex.test(name)) continue;
+
+    for (const addr of addrs) {
+      if (addr.family !== 'IPv4' || addr.internal) continue;
+      const ip = addr.address;
+      if (ip.startsWith('127.') || ip.startsWith('169.254.')) continue;
+
+      // Filter out MAC addresses belonging to common virtual hypervisors
+      const mac = (addr.mac || '').toLowerCase();
+      if (mac.startsWith('00:15:5d') || mac.startsWith('08:00:27') || mac.startsWith('00:05:69')) {
+        continue;
+      }
+
+      const nameLower = name.toLowerCase();
+      let priority = 10;
+      let typeLabel = 'LAN';
+      if (/wi-?fi|wlan|wireless/i.test(nameLower)) {
+        priority = 1;
+        typeLabel = 'Wi-Fi / Hotspot';
+      } else if (/ethernet/i.test(nameLower)) {
+        priority = 2;
+        typeLabel = 'Ethernet LAN';
+      } else if (/hotspot|hosted/i.test(nameLower)) {
+        priority = 1;
+        typeLabel = 'Mobile Hotspot';
+      }
+
+      // Check private IP classes
+      if (ip.startsWith('192.168.') || ip.startsWith('10.')) {
+        priority -= 0.5;
+      } else if (ip.startsWith('172.')) {
+        try {
+          const sec = parseInt(ip.split('.')[1], 10);
+          if (sec >= 16 && sec <= 31) priority -= 0.5;
+        } catch (e) {}
+      }
+
+      let subnet = '';
+      let broadcast = '';
+      try {
+        const ipParts = ip.split('.').map(Number);
+        const maskParts = (addr.netmask || '255.255.255.0').split('.').map(Number);
+        const netParts = ipParts.map((p, i) => p & maskParts[i]);
+        const bcastParts = ipParts.map((p, i) => p | (~maskParts[i] & 255));
+        const prefix = addr.cidr ? addr.cidr.split('/')[1] : '24';
+        subnet = `${netParts.join('.')}/${prefix}`;
+        broadcast = bcastParts.join('.');
+      } catch (e) {
+        subnet = `${ip}/24`;
+        broadcast = '255.255.255.255';
+      }
+
+      valid.push({
+        interface: name,
+        type: typeLabel,
+        ip,
+        netmask: addr.netmask,
+        cidr: addr.cidr,
+        subnet,
+        broadcast,
+        url: `http://${ip}:${PORT}`,
+        priority
+      });
+    }
+  }
+
+  valid.sort((a, b) => a.priority - b.priority);
+  return valid;
+}
+
+/**
+ * Listens for LAN UDP discovery broadcasts and replies with active public rooms.
+ */
+function startLanDiscoveryResponder() {
+  try {
+    const udp = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    udp.on('error', (err) => {
+      console.log('[LAN Discovery] UDP note:', err.message);
+    });
+
+    udp.on('message', (msg, rinfo) => {
+      try {
+        const payload = JSON.parse(msg.toString());
+        if (payload.type === 'discover') {
+          const adapters = getValidPhysicalAdapters();
+          const hostIp = adapters.length > 0 ? adapters[0].ip : rinfo.address;
+          const publicRooms = db.getPublicRooms().map(r => ({
+            code: r.code,
+            title: r.title,
+            host_name: r.host_name,
+            users_count: r.users_count || 1
+          }));
+
+          const reply = Buffer.from(JSON.stringify({
+            type: 'discover_reply',
+            app: 'collaborative-whiteboard',
+            port: PORT,
+            ip: hostIp,
+            url: `http://${hostIp}:${PORT}`,
+            rooms: publicRooms
+          }));
+
+          udp.send(reply, rinfo.port, rinfo.address);
+        }
+      } catch (e) {}
+    });
+
+    udp.bind(DISCOVERY_PORT, '0.0.0.0', () => {
+      try {
+        udp.setBroadcast(true);
+      } catch (e) {}
+    });
+  } catch (err) {
+    console.log('[LAN Discovery] Initialization note:', err.message);
+  }
+}
+startLanDiscoveryResponder();
+
 // ── REST API ROUTES ──────────────────────────────────────────────────
 
 // Health check for Cloud Hosting platforms (Render, Railway, etc.)
@@ -45,29 +176,126 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// Network Discovery API (For zero-internet Hotspot, Wi-Fi LAN, and Localhost)
+// Network Discovery API (For zero-internet Hotspot and Wi-Fi LAN)
 app.get('/api/network-info', (req, res) => {
-  const interfaces = os.networkInterfaces();
-  const addresses = [];
-  for (const [name, addrs] of Object.entries(interfaces)) {
-    if (!addrs) continue;
-    for (const addr of addrs) {
-      if (addr.family === 'IPv4' && !addr.internal) {
-        addresses.push({
-          interface: name,
-          ip: addr.address,
-          url: `http://${addr.address}:${PORT}`
-        });
-      }
-    }
-  }
+  const adapters = getValidPhysicalAdapters();
+  const primary = adapters.length > 0 ? adapters[0] : null;
+
   res.json({
     port: PORT,
     hostname: os.hostname(),
-    addresses,
-    primary_ip: addresses.length > 0 ? addresses[0].ip : '127.0.0.1',
-    primary_url: addresses.length > 0 ? addresses[0].url : `http://localhost:${PORT}`,
-    localhost_url: `http://localhost:${PORT}`
+    adapters,
+    primary_ip: primary?.ip || '127.0.0.1',
+    primary_adapter: primary,
+    primary_url: primary?.url || `http://localhost:${PORT}`,
+    subnet: primary?.subnet || '',
+    broadcast: primary?.broadcast || ''
+  });
+});
+
+// Subnet LAN Room Scanner (Discovers active whiteboard hosts on the same LAN without internet)
+app.get('/api/lan/scan', (req, res) => {
+  const adapters = getValidPhysicalAdapters();
+  const discovered = [];
+  const seenUrls = new Set();
+
+  // Include this host's own public rooms
+  const localRooms = db.getPublicRooms();
+  if (localRooms.length > 0 && adapters.length > 0) {
+    discovered.push({
+      ip: adapters[0].ip,
+      port: PORT,
+      url: `http://${adapters[0].ip}:${PORT}`,
+      interface: adapters[0].interface,
+      type: adapters[0].type,
+      rooms: localRooms.map(r => ({
+        code: r.code,
+        title: r.title,
+        host_name: r.host_name,
+        users_count: r.users_count || 1
+      }))
+    });
+    seenUrls.add(`http://${adapters[0].ip}:${PORT}`);
+  }
+
+  try {
+    const client = dgram.createSocket('udp4');
+    client.bind(0, () => {
+      try { client.setBroadcast(true); } catch (e) {}
+
+      const probe = Buffer.from(JSON.stringify({ type: 'discover', from_port: PORT }));
+      const targets = new Set(['255.255.255.255']);
+      adapters.forEach(a => {
+        if (a.broadcast) targets.add(a.broadcast);
+      });
+
+      targets.forEach(t => {
+        try { client.send(probe, DISCOVERY_PORT, t); } catch (e) {}
+      });
+    });
+
+    client.on('message', (msg, rinfo) => {
+      try {
+        const data = JSON.parse(msg.toString());
+        if (data.type === 'discover_reply' && data.rooms) {
+          const targetUrl = data.url || `http://${rinfo.address}:${data.port || PORT}`;
+          if (!seenUrls.has(targetUrl)) {
+            seenUrls.add(targetUrl);
+            discovered.push({
+              ip: data.ip || rinfo.address,
+              port: data.port || PORT,
+              url: targetUrl,
+              rooms: data.rooms
+            });
+          }
+        }
+      } catch (e) {}
+    });
+
+    // Wait 900ms for LAN replies
+    setTimeout(() => {
+      try { client.close(); } catch (e) {}
+      res.json({
+        success: true,
+        adapters,
+        discovered
+      });
+    }, 900);
+  } catch (err) {
+    res.json({ success: true, adapters, discovered });
+  }
+});
+
+// Verify if a target host IP is in the same physical LAN subnet
+app.post('/api/lan/verify-host', (req, res) => {
+  const { host } = req.body;
+  if (!host) return res.status(400).json({ error: 'Host IP is required' });
+
+  const cleanIp = host.replace(/^https?:\/\//, '').split(':')[0].trim();
+  const adapters = getValidPhysicalAdapters();
+
+  let matchedAdapter = null;
+  for (const a of adapters) {
+    try {
+      const ipParts = a.ip.split('.').map(Number);
+      const maskParts = (a.netmask || '255.255.255.0').split('.').map(Number);
+      const hostParts = cleanIp.split('.').map(Number);
+      if (hostParts.length === 4) {
+        const net1 = ipParts.map((p, i) => p & maskParts[i]).join('.');
+        const net2 = hostParts.map((p, i) => p & maskParts[i]).join('.');
+        if (net1 === net2) {
+          matchedAdapter = a;
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+
+  res.json({
+    sameSubnet: !!matchedAdapter,
+    matchedAdapter: matchedAdapter ? matchedAdapter.interface : null,
+    localSubnets: adapters.map(a => `${a.interface}: ${a.subnet}`),
+    targetIp: cleanIp
   });
 });
 

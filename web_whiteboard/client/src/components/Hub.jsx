@@ -43,6 +43,9 @@ export default function Hub({
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isStandaloneApp, setIsStandaloneApp] = useState(false);
   const [showAppModal, setShowAppModal] = useState(false);
+  const [isScanningLan, setIsScanningLan] = useState(false);
+  const [discoveredLanRooms, setDiscoveredLanRooms] = useState([]);
+  const [subnetVerification, setSubnetVerification] = useState(null);
   const fileInputRef = useRef(null);
 
   // Detect standalone app mode & PWA install prompts
@@ -206,13 +209,21 @@ export default function Hub({
       if (!res.ok) throw new Error(data.error || 'Failed to create room');
 
       if (mode === 'hotspot') {
-        const hostIp = netInfo?.primary_ip || window.location.hostname || '192.168.43.1';
+        const adapters = netInfo?.adapters || [];
+        const primary = netInfo?.primary_adapter || adapters[0] || {
+          interface: 'Wi-Fi / Hotspot',
+          type: 'Wi-Fi / Hotspot',
+          ip: netInfo?.primary_ip || window.location.hostname || '192.168.43.1',
+          subnet: netInfo?.subnet || 'Local Subnet',
+          url: `http://${netInfo?.primary_ip || window.location.hostname || '192.168.43.1'}:5000`
+        };
+
         setLanModalData({
           mode: 'hotspot',
           title: data.room.title,
           code: data.room.code,
-          ip: hostIp,
-          url: `http://${hostIp}:5000`,
+          adapters,
+          selectedAdapter: primary,
           room: data.room
         });
       } else {
@@ -225,10 +236,49 @@ export default function Hub({
     }
   };
 
-  const handleJoinDirect = (code) => {
+  const handleScanLan = async () => {
+    setIsScanningLan(true);
+    setDiscoveredLanRooms([]);
+    try {
+      const res = await fetch('/api/lan/scan');
+      const data = await res.json();
+      if (data.success && data.discovered) {
+        setDiscoveredLanRooms(data.discovered);
+        if (data.discovered.length === 0) {
+          alert('No other active whiteboard sessions discovered on your local network yet.\n\nMake sure your partner has clicked "2. Without Internet" and both devices are connected to the exact same Wi-Fi or Mobile Hotspot.');
+        }
+      }
+    } catch (err) {
+      alert('Could not scan LAN: ' + err.message);
+    } finally {
+      setIsScanningLan(false);
+    }
+  };
+
+  const handleCustomHostChange = async (val) => {
+    setCustomHostInput(val);
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.length < 7) {
+      setSubnetVerification(null);
+      return;
+    }
+    try {
+      const res = await fetch('/api/lan/verify-host', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: trimmed })
+      });
+      const data = await res.json();
+      setSubnetVerification(data);
+    } catch (e) {
+      setSubnetVerification(null);
+    }
+  };
+
+  const handleJoinDirect = (code, customHost = null) => {
     const clean = code.trim().toUpperCase();
     if (!clean) return;
-    onJoinRoom(clean, customHostInput.trim() || null);
+    onJoinRoom(clean, (customHost || customHostInput).trim() || null);
   };
 
   const copyCode = (code) => {
@@ -412,14 +462,14 @@ export default function Hub({
                   <h3 className="font-bold text-sm text-slate-900">Join Existing Whiteboard</h3>
                   <p className="text-xs text-slate-500">Enter the 4-letter room code shared by your host:</p>
                 </div>
-                <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                   <input
                     type="text"
                     maxLength={4}
                     value={joinCodeInput}
                     onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
                     placeholder="HZSE"
-                    className="w-28 px-3 py-2 text-center text-sm font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl uppercase tracking-widest focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-24 px-3 py-2 text-center text-sm font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl uppercase tracking-widest focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     onClick={() => handleJoinDirect(joinCodeInput)}
@@ -428,8 +478,55 @@ export default function Hub({
                     <span>Join Room</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
+                  <button
+                    disabled={isScanningLan}
+                    onClick={handleScanLan}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 shrink-0"
+                    title="Automatically find active whiteboard sessions on the same Wi-Fi / Hotspot"
+                  >
+                    <Wifi className="w-3.5 h-3.5" />
+                    <span>{isScanningLan ? 'Scanning LAN...' : '📡 Scan Same LAN'}</span>
+                  </button>
                 </div>
               </div>
+
+              {/* Discovered Rooms on Same LAN */}
+              {discoveredLanRooms.length > 0 && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2.5 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      Active Whiteboards Discovered on Same LAN Subnet:
+                    </p>
+                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/70 px-2 py-0.5 rounded-full">
+                      Zero Internet
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {discoveredLanRooms.map(item => (
+                      item.rooms.map(room => (
+                        <div key={`${item.ip}-${room.code}`} className="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between shadow-2xs hover:border-emerald-400 transition">
+                          <div>
+                            <p className="text-xs font-bold text-slate-900">{room.title}</p>
+                            <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                              Room Code: <strong className="text-blue-600 font-extrabold">{room.code}</strong> &bull; Host: {room.host_name}
+                            </p>
+                            <p className="text-[10px] text-emerald-700 font-mono">
+                              LAN IP: {item.ip}:{item.port}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleJoinDirect(room.code, item.url)}
+                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition shrink-0"
+                          >
+                            Join Now
+                          </button>
+                        </div>
+                      ))
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Expandable Custom LAN / Hotspot IP Option for Joiner */}
               <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
@@ -443,22 +540,45 @@ export default function Hub({
                 </button>
 
                 {showCustomHostInput && (
-                  <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center gap-3 animate-fade-in">
-                    <div className="flex-1 w-full">
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Host Server IP & Port (e.g., 192.168.43.1:5000):
-                      </label>
-                      <input
-                        type="text"
-                        value={customHostInput}
-                        onChange={(e) => setCustomHostInput(e.target.value)}
-                        placeholder="192.168.43.1:5000"
-                        className="w-full px-3 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
+                  <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 flex flex-col gap-2.5 animate-fade-in">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                      <div className="flex-1 w-full">
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                          Host Server IP & Port (e.g., 10.36.112.55:5000 or 192.168.43.1:5000):
+                        </label>
+                        <input
+                          type="text"
+                          value={customHostInput}
+                          onChange={(e) => handleCustomHostChange(e.target.value)}
+                          placeholder="10.36.112.55:5000"
+                          className="w-full px-3 py-1.5 text-xs font-mono bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <span className="text-[11px] text-slate-500 max-w-xs">
+                        Join another device's Mobile Hotspot or LAN session without active internet.
+                      </span>
                     </div>
-                    <span className="text-[11px] text-slate-500 max-w-xs">
-                      Join another device's Mobile Hotspot or LAN session without active internet.
-                    </span>
+
+                    {/* Subnet Verification Feedback */}
+                    {subnetVerification && (
+                      <div className={`p-2.5 rounded-lg text-xs font-medium flex items-start gap-2 ${
+                        subnetVerification.sameSubnet
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          : 'bg-amber-100 text-amber-900 border border-amber-300'
+                      }`}>
+                        {subnetVerification.sameSubnet ? (
+                          <>
+                            <Check className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                            <span><strong>Same LAN Confirmed:</strong> Target IP {subnetVerification.targetIp} is on your exact local network ({subnetVerification.matchedAdapter}).</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-base shrink-0 leading-none">⚠️</span>
+                            <span><strong>Subnet Mismatch Warning:</strong> Host IP {subnetVerification.targetIp} is NOT on your active local subnets ({subnetVerification.localSubnets.join(', ')}). Please verify both devices are on the exact same Wi-Fi / Hotspot.</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -629,22 +749,45 @@ export default function Hub({
       {/* ── HOTSPOT / LAN CONNECTION INFO MODAL (ZERO INTERNET) ── */}
       {lanModalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-scale-up">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl text-white bg-emerald-600">
+                <span className="p-2 rounded-xl text-white bg-emerald-600 shadow-xs">
                   <Wifi className="w-5 h-5" />
                 </span>
                 <div>
                   <h3 className="font-bold text-sm text-slate-900">
-                    ⚡ Direct Hotspot Whiteboard Active
+                    ⚡ Direct LAN / Hotspot Whiteboard Active
                   </h3>
-                  <p className="text-xs text-slate-500">Zero Active Internet Connection Required</p>
+                  <p className="text-xs text-slate-500">Airtight Same-LAN Connection &bull; Zero Internet Required</p>
                 </div>
               </div>
             </div>
 
             <div className="space-y-3.5">
+              {/* If multiple verified physical LAN adapters exist, let host choose */}
+              {lanModalData.adapters && lanModalData.adapters.length > 1 && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold text-slate-500">Active Physical Network Adapter:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {lanModalData.adapters.map(ad => (
+                      <button
+                        key={ad.ip}
+                        onClick={() => setLanModalData(prev => ({ ...prev, selectedAdapter: ad }))}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+                          lanModalData.selectedAdapter.ip === ad.ip
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Wifi className="w-3.5 h-3.5" />
+                        <span>{ad.interface} ({ad.ip})</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] uppercase font-bold text-slate-400">4-Letter Room Code</span>
                 <div className="flex items-center justify-between mt-1">
@@ -662,16 +805,23 @@ export default function Hub({
               </div>
 
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-400">
-                  Host Wi-Fi / Hotspot URL
-                </span>
-                <div className="flex items-center justify-between mt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-slate-400">
+                    Host Wi-Fi / Hotspot LAN URL
+                  </span>
+                  {lanModalData.selectedAdapter?.subnet && (
+                    <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Subnet: {lanModalData.selectedAdapter.subnet}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
                   <span className="text-xs font-mono font-bold text-slate-800 truncate mr-2">
-                    {lanModalData.url}
+                    {lanModalData.selectedAdapter?.url}
                   </span>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(lanModalData.url);
+                      navigator.clipboard.writeText(lanModalData.selectedAdapter?.url);
                       setCopiedLanUrl(true);
                       setTimeout(() => setCopiedLanUrl(false), 2000);
                     }}
@@ -684,11 +834,11 @@ export default function Hub({
               </div>
 
               <div className="text-xs text-slate-600 space-y-1.5 bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100">
-                <p className="font-bold text-emerald-950 text-xs">How Joiners Connect Without Internet:</p>
+                <p className="font-bold text-emerald-950 text-xs">How Partners Connect on the Same LAN:</p>
                 <ol className="list-decimal pl-4 space-y-1 text-[11px] text-emerald-900">
-                  <li>Connect their mobile phone, tablet, or laptop to your Wi-Fi or Mobile Hotspot.</li>
-                  <li>Open <strong className="font-mono">{lanModalData.url}</strong> in any browser.</li>
-                  <li>Enter room code <strong className="font-mono">{lanModalData.code}</strong> to start drawing and chatting with zero internet!</li>
+                  <li>Connect their mobile phone, tablet, or laptop to this <strong>SAME Wi-Fi router or Mobile Hotspot ({lanModalData.selectedAdapter?.interface})</strong>.</li>
+                  <li>Ensure their IP is in the same local subnet (<strong className="font-mono">{lanModalData.selectedAdapter?.subnet}</strong>).</li>
+                  <li>Open <strong className="font-mono">{lanModalData.selectedAdapter?.url}</strong> in any browser (or click <strong>"Scan Same LAN"</strong> in their Desktop App) and enter room code <strong className="font-mono">{lanModalData.code}</strong>.</li>
                 </ol>
               </div>
 

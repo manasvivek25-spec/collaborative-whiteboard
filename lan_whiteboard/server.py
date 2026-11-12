@@ -1450,15 +1450,20 @@ def client_thread(sock, addr):
 # ── main ──────────────────────────────────────────────────────────────
 def get_local_ip_info():
     """Detects primary physical network adapter IP (Wi-Fi, Mobile Hotspot, or Ethernet).
-    Excludes virtual internal switches (WSL, Hyper-V, VirtualBox, VMware) and APIPA (169.254.x.x)."""
+    Excludes virtual internal switches (WSL, Hyper-V, VirtualBox, VMware, Docker, etc.) and APIPA (169.254.x.x)."""
     try:
         import psutil
         stats = psutil.net_if_stats()
         addrs = psutil.net_if_addrs()
         candidates = []
+        virtual_names = [
+            "vethernet", "hyper-v", "wsl", "virtualbox", "vmware", "loopback",
+            "bluetooth", "docker", "tailscale", "zerotier", "hamachi", "tap",
+            "tun", "teredo", "npcap", "pseudo"
+        ]
         for iface, if_addrs in addrs.items():
             iface_lower = iface.lower()
-            if any(v in iface_lower for v in ["vethernet", "hyper-v", "wsl", "virtualbox", "vmware", "loopback", "bluetooth"]):
+            if any(v in iface_lower for v in virtual_names):
                 continue
             stat = stats.get(iface)
             is_up = stat.isup if stat else False
@@ -1467,13 +1472,23 @@ def get_local_ip_info():
                     ip = a.address
                     if ip.startswith("127.") or ip.startswith("169.254."):
                         continue
-                    priority = 10
+                    priority = 10.0
                     if any(w in iface_lower for w in ["wi-fi", "wifi", "wireless"]):
-                        priority = 1
+                        priority = 1.0
                     elif any(e in iface_lower for e in ["ethernet", "lan"]):
-                        priority = 2
-                    elif any(h in iface_lower for h in ["hotspot", "hosted", "local area connection"]):
-                        priority = 3
+                        priority = 2.0
+                    elif any(h in iface_lower for h in ["hotspot", "hosted"]):
+                        priority = 1.0
+
+                    if ip.startswith("192.168.") or ip.startswith("10."):
+                        priority -= 0.5
+                    elif ip.startswith("172."):
+                        try:
+                            sec = int(ip.split(".")[1])
+                            if 16 <= sec <= 31:
+                                priority -= 0.5
+                        except Exception:
+                            pass
                     candidates.append((priority, is_up, iface, ip))
         candidates.sort(key=lambda c: (c[0], not c[1]))
         if candidates:
@@ -1483,24 +1498,15 @@ def get_local_ip_info():
         pass
 
     try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        probe.connect(("8.8.8.8", 80))
-        ip = probe.getsockname()[0]
-        probe.close()
-        if not ip.startswith("127.") and not ip.startswith("169.254."):
-            return ip, "LAN"
+        raw_ips = [x[4][0] for x in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+        filtered = [ip for ip in raw_ips if not ip.startswith("127.") and not ip.startswith("169.254.")]
+        filtered.sort(key=lambda ip: (0 if ip.startswith("192.168.") or ip.startswith("10.") else 1))
+        if filtered:
+            return filtered[0], "LAN"
     except Exception:
         pass
 
-    try:
-        _h, _aliases, ips = socket.gethostbyname_ex(socket.gethostname())
-        for ip in ips:
-            if not ip.startswith("127.") and not ip.startswith("169.254."):
-                return ip, "LAN"
-    except Exception:
-        pass
-
-    return "127.0.0.1", "Localhost"
+    return "192.168.1.1", "LAN"
 
 
 def get_local_ip():

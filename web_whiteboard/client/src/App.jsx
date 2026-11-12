@@ -30,16 +30,15 @@ export default function App() {
     if (!user?.user_code) return;
 
     let wsUrl = '';
-    if (customServerHost) {
+    const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    if (customServerHost && !isLoadedFromLanHost) {
       const cleanHost = customServerHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
       const isHttps = customServerHost.startsWith('https://');
       wsUrl = `${isHttps ? 'wss:' : 'ws:'}//${cleanHost}`;
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
-      wsUrl = process.env.NODE_ENV === 'production'
-        ? `${protocol}//${host}`
-        : `ws://${window.location.hostname}:5000`;
+      wsUrl = `${protocol}//${host}`;
     }
 
     let socket = null;
@@ -91,7 +90,8 @@ export default function App() {
 
   const handleJoinDirect = async (code, customHost = null) => {
     try {
-      const hostToUse = customHost || customServerHost;
+      const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      const hostToUse = customHost || (isLoadedFromLanHost ? '' : customServerHost);
       if (customHost !== null && customHost !== undefined) {
         setCustomServerHost(customHost);
         localStorage.setItem('whiteboard_custom_server', customHost);
