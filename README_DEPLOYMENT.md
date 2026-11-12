@@ -6,7 +6,7 @@ Production-scale collaborative whiteboard system featuring:
 - **Host Member Enrollment:** Hosts can add members by typing their `USR-XXXX` code, Email, or IP, or by 1-clicking active users on the server.
 - **SQLite Database Persistence:** All users, rooms, drawing actions, chat logs, and milestones are stored permanently in `server/data/whiteboard_data.db`.
 - **Modern React + Vite UI:** Google Classroom-style dashboard with Group vs Personal switcher, interactive HTML5 canvas, ink-to-font conversion, remote cursors, and live chat.
-- **All Previous Modes Preserved:** Works **With Internet (Cloud)**, **Without Internet (Hotspot Option 2)**, and **Localhost (127.0.0.1)**, plus the original desktop Python `.exe` applications!
+- **Dual Connection Modes:** Works **With Internet (Cloud & Cross-Network)** and **Without Internet (Direct Wi-Fi / Hotspot)**, plus the original desktop Python `.exe` applications!
 
 ---
 

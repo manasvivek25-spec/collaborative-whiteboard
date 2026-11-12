@@ -78,3 +78,4 @@ fs.writeFileSync(path.join(publicDir, 'icon-192.png'), icon192);
 fs.writeFileSync(path.join(publicDir, 'icon-512.png'), icon512);
 
 console.log('Successfully created icon-192.png and icon-512.png in public directory');
+

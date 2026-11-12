@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Globe,
   Wifi,
-  Laptop,
   Plus,
   Users,
   Search,
@@ -178,8 +177,7 @@ export default function Hub({
   const handleCreateGroupRoom = async (mode) => {
     const defaultTitles = {
       cloud: 'Cloud Collaboration Session',
-      hotspot: 'Direct Hotspot Whiteboard',
-      localhost: 'Localhost Session'
+      hotspot: 'Direct Hotspot Whiteboard'
     };
     const title = prompt('Enter the name of your whiteboard session:', defaultTitles[mode] || 'Team Whiteboard');
     if (!title) return;
@@ -215,15 +213,6 @@ export default function Hub({
           code: data.room.code,
           ip: hostIp,
           url: `http://${hostIp}:5000`,
-          room: data.room
-        });
-      } else if (mode === 'localhost') {
-        setLanModalData({
-          mode: 'localhost',
-          title: data.room.title,
-          code: data.room.code,
-          ip: '127.0.0.1',
-          url: 'http://localhost:5000',
           room: data.room
         });
       } else {
@@ -361,7 +350,7 @@ export default function Hub({
                 Choose your network connection mode to host a collaborative session:
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Option 1: Cloud & Internet Mode */}
                 <div className="p-5 rounded-2xl border border-blue-200 bg-blue-50/50 flex flex-col justify-between hover:shadow-md transition">
                   <div>
@@ -413,32 +402,6 @@ export default function Hub({
                     1-Click Host Hotspot
                   </button>
                 </div>
-
-                {/* Option 3: Localhost */}
-                <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50 flex flex-col justify-between hover:shadow-md transition">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="p-2.5 rounded-xl bg-slate-800 text-white shadow-sm">
-                        <Laptop className="w-5 h-5" />
-                      </span>
-                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-slate-200 text-slate-800 rounded-full">
-                        Loopback
-                      </span>
-                    </div>
-                    <h3 className="font-bold text-sm text-slate-900">3. Run on Localhost</h3>
-                    <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                      Fast 127.0.0.1 loopback for offline testing and single-machine multi-window collaboration.
-                    </p>
-                  </div>
-                  <button
-                    disabled={loading}
-                    onClick={() => handleCreateGroupRoom('localhost')}
-                    className="mt-5 w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Run Localhost
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -483,7 +446,7 @@ export default function Hub({
                   <div className="p-3.5 bg-blue-50/70 rounded-xl border border-blue-200 flex flex-col sm:flex-row items-start sm:items-center gap-3 animate-fade-in">
                     <div className="flex-1 w-full">
                       <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                        Host Server IP & Port (e.g., 192.168.43.1:5000 or localhost:5000):
+                        Host Server IP & Port (e.g., 192.168.43.1:5000):
                       </label>
                       <input
                         type="text"
@@ -494,7 +457,7 @@ export default function Hub({
                       />
                     </div>
                     <span className="text-[11px] text-slate-500 max-w-xs">
-                      Join another device's Mobile Hotspot or Localhost session without active internet.
+                      Join another device's Mobile Hotspot or LAN session without active internet.
                     </span>
                   </div>
                 )}
@@ -663,18 +626,18 @@ export default function Hub({
         )}
       </main>
 
-      {/* ── HOTSPOT / LOCALHOST CONNECTION INFO MODAL (ZERO INTERNET) ── */}
+      {/* ── HOTSPOT / LAN CONNECTION INFO MODAL (ZERO INTERNET) ── */}
       {lanModalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-scale-up">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div className="flex items-center gap-2.5">
-                <span className={`p-2 rounded-xl text-white ${lanModalData.mode === 'hotspot' ? 'bg-emerald-600' : 'bg-slate-900'}`}>
-                  {lanModalData.mode === 'hotspot' ? <Wifi className="w-5 h-5" /> : <Laptop className="w-5 h-5" />}
+                <span className="p-2 rounded-xl text-white bg-emerald-600">
+                  <Wifi className="w-5 h-5" />
                 </span>
                 <div>
                   <h3 className="font-bold text-sm text-slate-900">
-                    {lanModalData.mode === 'hotspot' ? '⚡ Direct Hotspot Whiteboard Active' : '💻 Localhost Whiteboard Active'}
+                    ⚡ Direct Hotspot Whiteboard Active
                   </h3>
                   <p className="text-xs text-slate-500">Zero Active Internet Connection Required</p>
                 </div>
@@ -700,7 +663,7 @@ export default function Hub({
 
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] uppercase font-bold text-slate-400">
-                  {lanModalData.mode === 'hotspot' ? 'Host Wi-Fi / Hotspot URL' : 'Localhost URL'}
+                  Host Wi-Fi / Hotspot URL
                 </span>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-xs font-mono font-bold text-slate-800 truncate mr-2">

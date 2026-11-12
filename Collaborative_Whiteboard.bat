@@ -18,3 +18,4 @@ if %errorlevel% neq 0 (
 :: Run via silent VBScript launcher to prevent unwanted terminal windows
 start "" wscript.exe "%~dp0Collaborative_Whiteboard.vbs"
 exit
+

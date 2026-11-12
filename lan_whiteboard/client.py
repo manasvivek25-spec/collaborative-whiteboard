@@ -4745,10 +4745,9 @@ class WhiteboardHub:
     Full-Screen Whiteboard Logs & Workspace Hub.
     - Direct start in full-screen/maximized mode (no login dialog popup needed)
     - First Group, then Personal switcher (Group default)
-    - Group creation with 3 options:
+    - Group creation with 2 options:
         1. With Internet (Wi-Fi / LAN)
         2. Without Internet (Option 2: Ad-Hoc / Mobile Hotspot)
-        3. Run on Localhost (127.0.0.1)
     - Dynamic Notification Icon (badge ONLY shown when notifications arrive, not hardcoded)
     - Personal tab: User-created whiteboards only (no default seeds)
     - Profile Details: Edit Name, Mail ID, and Profile Pic only
@@ -5081,13 +5080,12 @@ class WhiteboardHub:
             self.render_personal_tab()
 
     # ----------------------------------------------------------------
-    # Group Tab: 3 Creation Options + Join Options
+    # Group Tab: 2 Creation Options + Join Options
     # 1. With Internet
     # 2. Without Internet (Option 2)
-    # 3. Run on Localhost
     # ----------------------------------------------------------------
     def render_group_tab(self):
-        # Section 1: Create Group Whiteboard with 3 options
+        # Section 1: Create Group Whiteboard with 2 options
         create_card = tk.Frame(self.cards_frame, bg="#ffffff", highlightthickness=2, highlightbackground="#27272a", padx=24, pady=20)
         create_card.pack(fill="x", padx=16, pady=8)
 
@@ -5095,12 +5093,11 @@ class WhiteboardHub:
         tk.Label(create_card, text="Choose your connection mode to host a collaborative whiteboard for your peers:",
                  font=("Segoe UI", 9), bg="#ffffff", fg="#71717a").pack(anchor="w", pady=(2, 16))
 
-        # 3 Option Cards Container
+        # 2 Option Cards Container
         grid_frame = tk.Frame(create_card, bg="#ffffff")
         grid_frame.pack(fill="x")
         grid_frame.columnconfigure(0, weight=1, uniform="opts")
         grid_frame.columnconfigure(1, weight=1, uniform="opts")
-        grid_frame.columnconfigure(2, weight=1, uniform="opts")
 
         # Option 1: With Internet
         opt1 = tk.Frame(grid_frame, bg="#f8fafc", highlightthickness=1, highlightbackground="#cbd5e1", padx=14, pady=14)
@@ -5125,18 +5122,6 @@ class WhiteboardHub:
                  font=("Segoe UI", 8, "bold"), bg="#f0fdf4", fg="#16a34a").pack(anchor="w", pady=(0, 10))
         tk.Button(opt2, text="1-Click Host", font=("Segoe UI", 9, "bold"), bg="#16a34a", fg="#ffffff",
                   relief="flat", bd=0, padx=14, pady=6, cursor="hand2", command=self.host_without_internet).pack(anchor="w")
-
-        # Option 3: Run on Localhost
-        opt3 = tk.Frame(grid_frame, bg="#f8fafc", highlightthickness=1, highlightbackground="#cbd5e1", padx=14, pady=14)
-        opt3.grid(row=0, column=2, padx=6, sticky="nsew")
-        tk.Label(opt3, text="💻 Run on Localhost", font=("Segoe UI", 11, "bold"), bg="#f8fafc", fg="#09090b").pack(anchor="w")
-        tk.Label(opt3, text="127.0.0.1 Loopback", font=("Segoe UI", 8, "bold"), bg="#e2e8f0", fg="#334155", padx=6, pady=1).pack(anchor="w", pady=(3, 6))
-        tk.Label(opt3, text="Run and test locally on this PC using 127.0.0.1. Ideal for fast offline loopback collaboration.",
-                 font=("Segoe UI", 8), bg="#f8fafc", fg="#64748b", wraplength=220, justify="left").pack(anchor="w", pady=(0, 8))
-        tk.Label(opt3, text="📍 Active: 127.0.0.1 (Loopback)",
-                 font=("Segoe UI", 8, "bold"), bg="#f8fafc", fg="#334155").pack(anchor="w", pady=(0, 10))
-        tk.Button(opt3, text="Run Localhost", font=("Segoe UI", 9, "bold"), bg="#18181b", fg="#ffffff",
-                  relief="flat", bd=0, padx=14, pady=6, cursor="hand2", command=self.host_localhost).pack(anchor="w")
 
         # Section 2: Join Existing Room
         join_card = tk.Frame(self.cards_frame, bg="#ffffff", highlightthickness=2, highlightbackground="#27272a", padx=24, pady=18)
@@ -5602,9 +5587,6 @@ class WhiteboardHub:
 
         tk.Button(box, text="⚡ 2. Without Internet (Hotspot Option 2)", font=("Segoe UI", 10, "bold"), bg="#16a34a", fg="#ffffff",
                   relief="flat", bd=0, pady=8, cursor="hand2", command=lambda: [pop.destroy(), self.host_without_internet()]).pack(fill="x", pady=4)
-
-        tk.Button(box, text="💻 3. Run on Localhost (127.0.0.1)", font=("Segoe UI", 10, "bold"), bg="#18181b", fg="#ffffff",
-                  relief="flat", bd=0, pady=8, cursor="hand2", command=lambda: [pop.destroy(), self.host_localhost()]).pack(fill="x", pady=4)
 
         tk.Button(box, text="Cancel", font=("Segoe UI", 9), bg="#f4f4f5", fg="#27272a",
                   relief="flat", bd=0, pady=6, cursor="hand2", command=pop.destroy).pack(fill="x", pady=(10, 0))
