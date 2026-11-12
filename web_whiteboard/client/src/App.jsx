@@ -22,6 +22,11 @@ export default function App() {
   const [customServerHost, setCustomServerHost] = useState(() => {
     return localStorage.getItem('whiteboard_custom_server') || '';
   });
+  const [noticeModal, setNoticeModal] = useState(null); // { title, message, type }
+
+  const showNotice = (title, message, type = 'info') => {
+    setNoticeModal({ title, message, type });
+  };
 
   const wsRef = useRef(null);
 
@@ -42,7 +47,8 @@ export default function App() {
         isOffline: true
       });
     } else if (roomParam) {
-      const defaultUser = user || { user_code: 'USR-E9PG', name: 'Manas Vivek (Host)', avatar_color: '#3b82f6' };
+      const randSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const defaultUser = user || { user_code: `USR-${randSuffix}`, name: `Collaborator ${randSuffix}`, avatar_color: '#10b981' };
       if (!user) {
         setUser(defaultUser);
         try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
@@ -117,20 +123,43 @@ export default function App() {
 
   const handleJoinDirect = async (code, customHost = null) => {
     try {
-      const cleanCode = code.trim().toUpperCase();
+      let cleanCode = code ? code.trim() : '';
       if (!cleanCode) return;
 
+      let extractedHost = null;
+
+      // Detect if user pasted a full URL (e.g., https://xxx.loca.lt?room=DR5F or http://10.36.112.55:5000)
+      if (cleanCode.startsWith('http://') || cleanCode.startsWith('https://')) {
+        try {
+          const parsed = new URL(cleanCode);
+          extractedHost = parsed.origin;
+          const qRoom = parsed.searchParams.get('room');
+          if (qRoom) {
+            cleanCode = qRoom.toUpperCase();
+          } else {
+            const pParts = parsed.pathname.split('/').filter(Boolean);
+            if (pParts.length > 0 && pParts[0].length === 4) {
+              cleanCode = pParts[0].toUpperCase();
+            }
+          }
+        } catch (e) {}
+      } else {
+        cleanCode = cleanCode.toUpperCase();
+      }
+
       const isLoadedFromLanHost = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
-      let hostToUse = customHost || (isLoadedFromLanHost ? '' : customServerHost);
+      let hostToUse = extractedHost || customHost || (isLoadedFromLanHost ? '' : customServerHost);
       let baseUrl = hostToUse
         ? (hostToUse.startsWith('http') ? hostToUse : `http://${hostToUse}`).replace(/\/$/, '')
         : '';
 
       let roomFound = null;
 
-      // 1. Try local/current designated host first
+      // 1. Try designated host/server first
       try {
-        const res = await fetch(`${baseUrl}/api/rooms/${cleanCode}`);
+        const res = await fetch(`${baseUrl}/api/rooms/${cleanCode}`, {
+          headers: { 'Bypass-Tunnel-Reminder': 'true' }
+        });
         if (res.ok) {
           const data = await res.json();
           if (data.room) {
@@ -138,11 +167,11 @@ export default function App() {
           }
         }
       } catch (err) {
-        // Local query failed, proceed to auto-scan LAN
+        // Query failed, proceed to auto-scan LAN
       }
 
-      // 2. If not found and no specific custom host was forced, automatically search LAN hosts via UDP
-      if (!roomFound && !customHost) {
+      // 2. If not found and no specific custom host was forced, search LAN hosts via UDP
+      if (!roomFound && !extractedHost && !customHost) {
         try {
           const scanRes = await fetch('/api/lan/scan');
           if (scanRes.ok) {
@@ -152,7 +181,9 @@ export default function App() {
                 if (hostItem.rooms && hostItem.rooms.some(r => r.code === cleanCode)) {
                   // Found the room on this LAN host!
                   const targetUrl = hostItem.url.replace(/\/$/, '');
-                  const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`);
+                  const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
+                    headers: { 'Bypass-Tunnel-Reminder': 'true' }
+                  });
                   if (remoteRes.ok) {
                     const remoteData = await remoteRes.json();
                     if (remoteData.room) {
@@ -172,17 +203,25 @@ export default function App() {
       }
 
       if (!roomFound) {
-        throw new Error(`Room "${cleanCode}" was not found. Please verify the 4-letter code and ensure both devices are connected to the exact same Wi-Fi / Hotspot.`);
+        showNotice(
+          'Room Not Found',
+          `Room "${cleanCode}" could not be located.\n\n` +
+          `• WITHOUT INTERNET: Ensure both laptops are connected to the exact same Wi-Fi router or Mobile Hotspot.\n` +
+          `• WITH INTERNET: Ask your host for their Public Share Link (or paste their public link here).`,
+          'warning'
+        );
+        return;
       }
 
-      if (customHost !== null && customHost !== undefined) {
-        setCustomServerHost(customHost);
-        localStorage.setItem('whiteboard_custom_server', customHost);
+      const finalHost = extractedHost || customHost;
+      if (finalHost) {
+        setCustomServerHost(finalHost);
+        localStorage.setItem('whiteboard_custom_server', finalHost);
       }
 
       handleOpenBoard({ room: roomFound, isOffline: false });
     } catch (err) {
-      alert(`Could not join room: ${err.message}`);
+      showNotice('Connection Error', `Could not join room: ${err.message}`, 'error');
     }
   };
 
@@ -242,6 +281,7 @@ export default function App() {
           onOpenAccountModal={() => setIsAccountModalOpen(true)}
           onOpenBoard={handleOpenBoard}
           onJoinRoom={handleJoinDirect}
+          showNotice={showNotice}
         />
       ) : (
         <Whiteboard
@@ -261,6 +301,34 @@ export default function App() {
           onClose={user ? () => setIsAccountModalOpen(false) : null}
           isEditing={Boolean(user)}
         />
+      )}
+
+      {/* Branded In-App Notice Modal (Eliminates browser 'localhost:5000 says' alerts) */}
+      {noticeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-scale-up">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <img src="/logo.png" alt="WB Logo" className="w-9 h-9 object-contain rounded-lg border border-slate-100 p-0.5" />
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">{noticeModal.title || 'Collaborative Whiteboard'}</h3>
+                  <p className="text-xs text-slate-500 font-medium">Real-Time Workspace</p>
+                </div>
+              </div>
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl mb-5">
+                <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line font-medium">{noticeModal.message}</p>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setNoticeModal(null)}
+                  className="px-5 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs rounded-xl shadow-sm transition"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

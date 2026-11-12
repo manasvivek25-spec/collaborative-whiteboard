@@ -280,14 +280,22 @@ export default function Whiteboard({
   useEffect(() => {
     if (isOffline || !ws) return;
 
+    const sendJoin = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'join_room',
+          room_code: room.code,
+          user_code: user?.user_code,
+          user_name: user?.name,
+          avatar_color: user?.avatar_color
+        }));
+      }
+    };
+
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'join_room',
-        room_code: room.code,
-        user_code: user?.user_code,
-        user_name: user?.name,
-        avatar_color: user?.avatar_color
-      }));
+      sendJoin();
+    } else {
+      ws.addEventListener('open', sendJoin, { once: true });
     }
 
     const onMessage = (e) => {
@@ -301,6 +309,7 @@ export default function Whiteboard({
 
     ws.addEventListener('message', onMessage);
     return () => {
+      ws.removeEventListener('open', sendJoin);
       ws.removeEventListener('message', onMessage);
     };
   }, [room.code, ws, isOffline, user]);
@@ -1977,7 +1986,7 @@ export default function Whiteboard({
     }
 
     if (!isHost && !isCohost) {
-      alert('Only the host or co-host can clear the canvas for all participants.');
+      showNotification('⚠️ Only the host or co-host can clear the canvas for all participants.');
       return;
     }
     if (window.confirm('Clear all drawings and items on the whiteboard?')) {
@@ -1992,13 +2001,13 @@ export default function Whiteboard({
   const handleInkToFont = () => {
     const strokeActions = currentDisplayActions.filter(a => a.kind === 'stroke' && !a.undone);
     if (strokeActions.length === 0) {
-      alert('Draw some letters, cursive words, numbers, or symbols with the pen first!');
+      showNotification('✏️ Draw some letters, cursive words, numbers, or symbols with the pen first!');
       return;
     }
 
     const { text, bbox } = recognizeInkStrokes(strokeActions);
     if (!text) {
-      alert('Could not recognize text from the current ink strokes.');
+      showNotification('⚠️ Could not recognize text from the current ink strokes.');
       return;
     }
 
@@ -2497,14 +2506,14 @@ export default function Whiteboard({
           showNotification(`📥 Imported ${importedActions.length} elements into Personal Space`);
         } else {
           if (!myPermissions.can_draw) {
-            alert('You do not have drawing permission to import elements into this session.');
+            showNotification('⚠️ You do not have drawing permission to import elements into this session.');
             return;
           }
           importedActions.forEach(act => commitAction(act));
           showNotification(`📥 Imported ${importedActions.length} elements into room`);
         }
       } catch (err) {
-        alert('Failed to read whiteboard file: ' + err.message);
+        showNotification('⚠️ Failed to read whiteboard file: ' + err.message);
       }
     };
     reader.readAsText(file);

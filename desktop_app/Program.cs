@@ -208,7 +208,7 @@ namespace CollaborativeWhiteboard
                 {
                     target = "http://" + target;
                 }
-                if (!target.Contains(":5000") && target.IndexOf(':', 7) == -1)
+                if (!target.StartsWith("https://") && !target.Contains(".loca.lt") && !target.Contains(":5000") && target.IndexOf(':', 7) == -1)
                 {
                     target = target + ":5000";
                 }

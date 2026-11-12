@@ -228,6 +228,7 @@ export function listPublicRooms() {
   `);
   return stmt.all();
 }
+export const getPublicRooms = listPublicRooms;
 
 export function updateRoomSettings(code, settings) {
   const cleanCode = code.trim().toUpperCase();
@@ -690,6 +691,7 @@ export default {
   createRoom,
   getRoom,
   listPublicRooms,
+  getPublicRooms: listPublicRooms,
   updateRoomSettings,
   updateRoomGridStyle,
   updateRoomPermissions,

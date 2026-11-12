@@ -26,7 +26,8 @@ export default function Hub({
   user,
   onOpenAccountModal,
   onOpenBoard,
-  onJoinRoom
+  onJoinRoom,
+  showNotice
 }) {
   const [currentTab, setCurrentTab] = useState('group'); // 'group' | 'personal'
   const [searchQuery, setSearchQuery] = useState('');
@@ -40,6 +41,7 @@ export default function Hub({
   const [customHostInput, setCustomHostInput] = useState('');
   const [lanModalData, setLanModalData] = useState(null);
   const [copiedLanUrl, setCopiedLanUrl] = useState(false);
+  const [copiedPublicUrl, setCopiedPublicUrl] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isStandaloneApp, setIsStandaloneApp] = useState(false);
   const [showAppModal, setShowAppModal] = useState(false);
@@ -178,10 +180,18 @@ export default function Hub({
 
         e.target.value = '';
 
-        alert(`Successfully imported "${newBoard.title}" with ${importedMilestones.length} saved instances into Personal Space!\n\nThis board is completely local on your device and will NOT interfere with any live collaborative session.`);
+        if (showNotice) {
+          showNotice(
+            'Import Successful',
+            `Successfully imported "${newBoard.title}" with ${importedMilestones.length} saved instances into Personal Space!\n\nThis board is completely local on your device and will NOT interfere with any live collaborative session.`,
+            'success'
+          );
+        }
         onOpenBoard({ room: { code: newBoard.id, title: newBoard.title, actions: importedActions, milestones: importedMilestones }, isOffline: true });
       } catch (err) {
-        alert('Invalid whiteboard package file: ' + err.message);
+        if (showNotice) {
+          showNotice('Import Error', 'Invalid whiteboard package file: ' + err.message, 'error');
+        }
       }
     };
     reader.readAsText(file);
@@ -198,11 +208,10 @@ export default function Hub({
 
   const handleCreateGroupRoom = async (mode) => {
     const defaultTitles = {
-      cloud: 'Cloud Collaboration Session',
-      hotspot: 'Direct Hotspot Whiteboard'
+      cloud: 'Internet Collaborative Whiteboard',
+      hotspot: 'LAN Offline Whiteboard'
     };
-    const title = prompt('Enter the name of your whiteboard session:', defaultTitles[mode] || 'Team Whiteboard');
-    if (!title) return;
+    const title = defaultTitles[mode] || 'Team Whiteboard';
 
     setLoading(true);
     try {
@@ -245,7 +254,31 @@ export default function Hub({
         };
       }
 
-      if (mode === 'hotspot') {
+      if (mode === 'cloud') {
+        // Mode 1: With Internet (Public Tunnel for Any Network Worldwide)
+        let publicTunnelUrl = null;
+        try {
+          const tRes = await fetch('/api/internet/start-tunnel', { method: 'POST' });
+          if (tRes.ok) {
+            const tData = await tRes.json();
+            if (tData.public_url) publicTunnelUrl = tData.public_url;
+          }
+        } catch (tErr) {
+          console.warn('[Internet Mode] Tunnel notice:', tErr);
+        }
+
+        const shareUrl = publicTunnelUrl ? `${publicTunnelUrl}?room=${createdRoom.code}` : `http://${window.location.host}?room=${createdRoom.code}`;
+
+        setLanModalData({
+          mode: 'internet',
+          title: createdRoom.title,
+          code: createdRoom.code,
+          publicUrl: shareUrl,
+          rawTunnelUrl: publicTunnelUrl,
+          room: createdRoom
+        });
+      } else {
+        // Mode 2: Without Internet (Pure LAN / Hotspot, Zero Internet Required)
         const adapters = netInfo?.adapters || [];
         const primary = netInfo?.primary_adapter || adapters[0] || {
           interface: 'Wi-Fi / Hotspot',
@@ -263,11 +296,13 @@ export default function Hub({
           selectedAdapter: primary,
           room: createdRoom
         });
-      } else {
-        onOpenBoard({ room: createdRoom, isOffline: false });
       }
     } catch (err) {
-      alert(`Error creating room: ${err.message}`);
+      if (showNotice) {
+        showNotice('Creation Error', `Could not create session: ${err.message}`, 'error');
+      } else {
+        console.error('Room creation error:', err);
+      }
     } finally {
       setLoading(false);
     }
@@ -281,11 +316,19 @@ export default function Hub({
       if (data.success && data.discovered) {
         setDiscoveredLanRooms(data.discovered);
         if (!silent && data.discovered.length === 0) {
-          alert('No other active whiteboard sessions discovered on your local network yet.\n\nMake sure your partner has clicked "2. Without Internet" and both devices are connected to the exact same Wi-Fi or Mobile Hotspot.');
+          if (showNotice) {
+            showNotice(
+              'No Sessions Discovered on LAN',
+              'No active whiteboard sessions discovered on your local network yet.\n\nMake sure your partner has clicked "2. Without Internet" and both devices are connected to the exact same Wi-Fi router or Mobile Hotspot.',
+              'info'
+            );
+          }
         }
       }
     } catch (err) {
-      if (!silent) alert('Could not scan LAN: ' + err.message);
+      if (!silent && showNotice) {
+        showNotice('LAN Scan Error', 'Could not scan LAN: ' + err.message, 'error');
+      }
     } finally {
       if (!silent) setIsScanningLan(false);
     }
@@ -510,16 +553,15 @@ export default function Hub({
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                   <h3 className="font-bold text-sm text-slate-900">Join Existing Whiteboard</h3>
-                  <p className="text-xs text-slate-500">Enter the 4-letter room code shared by your host:</p>
+                  <p className="text-xs text-slate-500">Enter 4-letter room code (LAN) or paste Public Link (Internet):</p>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                   <input
                     type="text"
-                    maxLength={4}
                     value={joinCodeInput}
-                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    placeholder="HZSE"
-                    className="w-24 px-3 py-2 text-center text-sm font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl uppercase tracking-widest focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onChange={(e) => setJoinCodeInput(e.target.value)}
+                    placeholder="Room Code (e.g. DR5F) or Link"
+                    className="w-full sm:w-64 px-3.5 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     onClick={() => handleJoinDirect(joinCodeInput)}
@@ -530,7 +572,7 @@ export default function Hub({
                   </button>
                   <button
                     disabled={isScanningLan}
-                    onClick={handleScanLan}
+                    onClick={() => handleScanLan(false)}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5 shrink-0"
                     title="Automatically find active whiteboard sessions on the same Wi-Fi / Hotspot"
                   >
@@ -586,7 +628,7 @@ export default function Hub({
                   className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1.5 transition self-start"
                 >
                   <Wifi className="w-3.5 h-3.5" />
-                  <span>{showCustomHostInput ? '▲ Hide Custom LAN / Hotspot Host Options' : '▼ Connect via Custom LAN / Hotspot Host IP (Zero Internet)'}</span>
+                  <span>{showCustomHostInput ? '▲ Hide Custom Host / Public Tunnel Options' : '▼ Connect via Custom Host / Public Tunnel URL (e.g., https://...loca.lt or 192.168.1.15:5000)'}</span>
                 </button>
 
                 {showCustomHostInput && (
@@ -796,116 +838,207 @@ export default function Hub({
         )}
       </main>
 
-      {/* ── HOTSPOT / LAN CONNECTION INFO MODAL (ZERO INTERNET) ── */}
+      {/* ── CONNECTION INFO MODAL (DUAL MODE: WITH INTERNET vs WITHOUT INTERNET) ── */}
       {lanModalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 animate-scale-up">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl text-white bg-emerald-600 shadow-xs">
-                  <Wifi className="w-5 h-5" />
-                </span>
-                <div>
-                  <h3 className="font-bold text-sm text-slate-900">
-                    ⚡ Direct LAN / Hotspot Whiteboard Active
-                  </h3>
-                  <p className="text-xs text-slate-500">Airtight Same-LAN Connection &bull; Zero Internet Required</p>
+            {lanModalData.mode === 'internet' ? (
+              /* Mode 1: With Internet (Public Cross-Network Tunnel) */
+              <>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl text-white bg-blue-600 shadow-xs">
+                      <Globe className="w-5 h-5" />
+                    </span>
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900">
+                        🌐 Public Internet Whiteboard Active
+                      </h3>
+                      <p className="text-xs text-slate-500">Cross-Network Worldwide &bull; Any Wi-Fi, 4G/5G Cellular & Broadband</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-blue-100 text-blue-800 rounded-full">
+                    Internet Active
+                  </span>
                 </div>
-              </div>
-            </div>
 
-            <div className="space-y-3.5">
-              {/* If multiple verified physical LAN adapters exist, let host choose */}
-              {lanModalData.adapters && lanModalData.adapters.length > 1 && (
-                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
-                  <span className="text-[10px] uppercase font-bold text-slate-500">Active Physical Network Adapter:</span>
-                  <div className="flex flex-wrap gap-2">
-                    {lanModalData.adapters.map(ad => (
+                <div className="space-y-3.5">
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">4-Letter Room Code</span>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-2xl font-mono font-extrabold text-blue-600 tracking-wider">
+                        {lanModalData.code}
+                      </span>
                       <button
-                        key={ad.ip}
-                        onClick={() => setLanModalData(prev => ({ ...prev, selectedAdapter: ad }))}
-                        className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
-                          lanModalData.selectedAdapter.ip === ad.ip
-                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
+                        onClick={() => copyCode(lanModalData.code)}
+                        className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs"
                       >
-                        <Wifi className="w-3.5 h-3.5" />
-                        <span>{ad.interface} ({ad.ip})</span>
+                        {copiedCode === lanModalData.code ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedCode === lanModalData.code ? 'Copied' : 'Copy Code'}</span>
                       </button>
-                    ))}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-blue-50/80 rounded-xl border border-blue-200">
+                    <span className="text-[10px] uppercase font-bold text-blue-700">
+                      Public Share Link (For Collaborators on ANY Network)
+                    </span>
+                    <div className="flex items-center justify-between mt-1.5 gap-2">
+                      <span className="text-xs font-mono font-bold text-blue-900 truncate">
+                        {lanModalData.publicUrl}
+                      </span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(lanModalData.publicUrl);
+                          setCopiedPublicUrl(true);
+                          setTimeout(() => setCopiedPublicUrl(false), 2000);
+                        }}
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs shrink-0"
+                      >
+                        {copiedPublicUrl ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedPublicUrl ? 'Copied Link' : 'Copy Link'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-600 space-y-1.5 bg-blue-50/40 p-3.5 rounded-xl border border-blue-100">
+                    <p className="font-bold text-blue-950 text-xs">How Anyone Connects Worldwide:</p>
+                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-blue-900">
+                      <li>Copy and send the <strong>Public Share Link</strong> to your collaborator anywhere in the world.</li>
+                      <li>They can open the link in <strong>any web browser</strong> or paste it into the Desktop App's join box.</li>
+                      <li>Connects across mobile cellular data (4G/5G), home broadband, or college networks seamlessly!</li>
+                    </ol>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => {
+                        const room = lanModalData.room;
+                        setLanModalData(null);
+                        onOpenBoard({ room, isOffline: false });
+                      }}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+                    >
+                      <span>Enter Whiteboard Session</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-              )}
-
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-400">4-Letter Room Code</span>
-                <div className="flex items-center justify-between mt-1">
-                  <span className="text-2xl font-mono font-extrabold text-blue-600 tracking-wider">
-                    {lanModalData.code}
-                  </span>
-                  <button
-                    onClick={() => copyCode(lanModalData.code)}
-                    className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs"
-                  >
-                    {copiedCode === lanModalData.code ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedCode === lanModalData.code ? 'Copied' : 'Copy Code'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">
-                    Host Wi-Fi / Hotspot LAN URL
-                  </span>
-                  {lanModalData.selectedAdapter?.subnet && (
-                    <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Subnet: {lanModalData.selectedAdapter.subnet}
+              </>
+            ) : (
+              /* Mode 2: Without Internet (Zero Internet LAN / Hotspot) */
+              <>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl text-white bg-emerald-600 shadow-xs">
+                      <Wifi className="w-5 h-5" />
                     </span>
-                  )}
-                </div>
-                <div className="flex items-center justify-between mt-1.5">
-                  <span className="text-xs font-mono font-bold text-slate-800 truncate mr-2">
-                    {lanModalData.selectedAdapter?.url}
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-900">
+                        ⚡ Direct LAN / Hotspot Whiteboard Active
+                      </h3>
+                      <p className="text-xs text-slate-500">Airtight Same-LAN Connection &bull; Zero Internet Required</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-full">
+                    Zero Internet
                   </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(lanModalData.selectedAdapter?.url);
-                      setCopiedLanUrl(true);
-                      setTimeout(() => setCopiedLanUrl(false), 2000);
-                    }}
-                    className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs shrink-0"
-                  >
-                    {copiedLanUrl ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedLanUrl ? 'Copied' : 'Copy URL'}</span>
-                  </button>
                 </div>
-              </div>
 
-              <div className="text-xs text-slate-600 space-y-1.5 bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100">
-                <p className="font-bold text-emerald-950 text-xs">How Partners Connect on the Same LAN:</p>
-                <ol className="list-decimal pl-4 space-y-1 text-[11px] text-emerald-900">
-                  <li>Connect their mobile phone, tablet, or laptop to this <strong>SAME Wi-Fi router or Mobile Hotspot ({lanModalData.selectedAdapter?.interface})</strong>.</li>
-                  <li>Ensure their IP is in the same local subnet (<strong className="font-mono">{lanModalData.selectedAdapter?.subnet}</strong>).</li>
-                  <li>Open <strong className="font-mono">{lanModalData.selectedAdapter?.url}</strong> in any browser (or click <strong>"Scan Same LAN"</strong> in their Desktop App) and enter room code <strong className="font-mono">{lanModalData.code}</strong>.</li>
-                </ol>
-              </div>
+                <div className="space-y-3.5">
+                  {/* If multiple verified physical LAN adapters exist, let host choose */}
+                  {lanModalData.adapters && lanModalData.adapters.length > 1 && (
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                      <span className="text-[10px] uppercase font-bold text-slate-500">Active Physical Network Adapter:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {lanModalData.adapters.map(ad => (
+                          <button
+                            key={ad.ip}
+                            onClick={() => setLanModalData(prev => ({ ...prev, selectedAdapter: ad }))}
+                            className={`py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center gap-1.5 border ${
+                              lanModalData.selectedAdapter.ip === ad.ip
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            <Wifi className="w-3.5 h-3.5" />
+                            <span>{ad.interface} ({ad.ip})</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
-              <div className="flex justify-end pt-2">
-                <button
-                  onClick={() => {
-                    const room = lanModalData.room;
-                    setLanModalData(null);
-                    onOpenBoard({ room, isOffline: false });
-                  }}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
-                >
-                  <span>Enter Whiteboard Session</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">4-Letter Room Code</span>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-2xl font-mono font-extrabold text-blue-600 tracking-wider">
+                        {lanModalData.code}
+                      </span>
+                      <button
+                        onClick={() => copyCode(lanModalData.code)}
+                        className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs"
+                      >
+                        {copiedCode === lanModalData.code ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedCode === lanModalData.code ? 'Copied' : 'Copy Code'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-slate-400">
+                        Host Wi-Fi / Hotspot LAN URL
+                      </span>
+                      {lanModalData.selectedAdapter?.subnet && (
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          Subnet: {lanModalData.selectedAdapter.subnet}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-1.5">
+                      <span className="text-xs font-mono font-bold text-slate-800 truncate mr-2">
+                        {lanModalData.selectedAdapter?.url}
+                      </span>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(lanModalData.selectedAdapter?.url);
+                          setCopiedLanUrl(true);
+                          setTimeout(() => setCopiedLanUrl(false), 2000);
+                        }}
+                        className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 flex items-center gap-1 shadow-2xs shrink-0"
+                      >
+                        {copiedLanUrl ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedLanUrl ? 'Copied' : 'Copy URL'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-600 space-y-1.5 bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-100">
+                    <p className="font-bold text-emerald-950 text-xs">How Partners Connect on the Same LAN:</p>
+                    <ol className="list-decimal pl-4 space-y-1 text-[11px] text-emerald-900">
+                      <li>Connect their mobile phone, tablet, or laptop to this <strong>SAME Wi-Fi router or Mobile Hotspot ({lanModalData.selectedAdapter?.interface || 'Local Wi-Fi'})</strong>.</li>
+                      <li>Ensure both devices are on this local network (zero internet needed).</li>
+                      <li>On their laptop, open the Desktop App and click <strong>"Scan Same LAN"</strong> or type room code <strong className="font-mono">{lanModalData.code}</strong>!</li>
+                    </ol>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => {
+                        const room = lanModalData.room;
+                        setLanModalData(null);
+                        onOpenBoard({ room, isOffline: false });
+                      }}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
+                    >
+                      <span>Enter Whiteboard Session</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

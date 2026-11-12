@@ -176,6 +176,38 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+let activeTunnel = null;
+let activeTunnelUrl = null;
+
+// Start / Retrieve Free Public Internet Tunnel for Cross-Network Collaboration
+app.post('/api/internet/start-tunnel', async (req, res) => {
+  if (activeTunnelUrl) {
+    return res.json({ success: true, public_url: activeTunnelUrl });
+  }
+
+  try {
+    const localtunnel = (await import('localtunnel')).default;
+    activeTunnel = await localtunnel({ port: PORT });
+    activeTunnelUrl = activeTunnel.url;
+    activeTunnel.on('close', () => {
+      activeTunnel = null;
+      activeTunnelUrl = null;
+    });
+    console.log('[Internet Mode] Public Tunnel established at:', activeTunnelUrl);
+    res.json({ success: true, public_url: activeTunnelUrl });
+  } catch (err) {
+    console.error('[Internet Mode] Could not establish tunnel:', err.message);
+    res.status(500).json({ error: 'Could not establish internet tunnel: ' + err.message });
+  }
+});
+
+app.get('/api/internet/status', (req, res) => {
+  res.json({
+    active: Boolean(activeTunnelUrl),
+    public_url: activeTunnelUrl
+  });
+});
+
 // Network Discovery API (For zero-internet Hotspot and Wi-Fi LAN)
 app.get('/api/network-info', (req, res) => {
   const adapters = getValidPhysicalAdapters();
