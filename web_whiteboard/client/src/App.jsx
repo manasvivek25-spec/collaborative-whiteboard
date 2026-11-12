@@ -178,7 +178,7 @@ export default function App() {
 
       let extractedHost = null;
 
-      // Detect if user pasted a full URL (e.g., https://xxx.loca.lt?room=DR5F or http://10.36.112.55:5000)
+      // Detect if user pasted a full URL or direct IP (e.g. 10.36.112.55:5000 or https://...loca.lt)
       if (cleanCode.startsWith('http://') || cleanCode.startsWith('https://')) {
         try {
           const parsed = new URL(cleanCode);
@@ -193,6 +193,10 @@ export default function App() {
             }
           }
         } catch (e) {}
+      } else if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?(\/.*)?$/.test(cleanCode)) {
+        const parts = cleanCode.split('/');
+        extractedHost = `http://${parts[0]}`;
+        cleanCode = parts[1] && parts[1].length === 4 ? parts[1].toUpperCase() : '';
       } else {
         cleanCode = cleanCode.toUpperCase();
       }
@@ -205,23 +209,70 @@ export default function App() {
 
       let roomFound = null;
 
-      // 1. Try designated host/server first
-      try {
-        const res = await fetch(`${baseUrl}/api/rooms/${cleanCode}`, {
-          headers: { 'Bypass-Tunnel-Reminder': 'true' }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.room) {
-            roomFound = data.room;
+      // Layer 1: Query designated host or local node server
+      if (cleanCode) {
+        try {
+          const res = await fetch(`${baseUrl}/api/rooms/${cleanCode}`, {
+            headers: { 'Bypass-Tunnel-Reminder': 'true' }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.room) roomFound = data.room;
           }
-        }
-      } catch (err) {
-        // Query failed, proceed to auto-scan LAN
+        } catch (err) {}
       }
 
-      // 2. If not found and no specific custom host was forced, search LAN hosts via UDP
-      if (!roomFound && !extractedHost && !customHost) {
+      // Layer 2: Cloud / Cross-Network Global Registry Lookup (for "With Internet" across any network)
+      if (!roomFound && cleanCode && !extractedHost && !customHost) {
+        try {
+          const resolveRes = await fetch(`/api/rooms/resolve/${cleanCode}`);
+          if (resolveRes.ok) {
+            const resolveData = await resolveRes.json();
+            if (resolveData.found && resolveData.room) {
+              roomFound = resolveData.room;
+              if (resolveData.url) {
+                setCustomServerHost(resolveData.url);
+                localStorage.setItem('whiteboard_custom_server', resolveData.url);
+              }
+            }
+          }
+        } catch (e) {}
+
+        // Direct client fallback to ntfy.sh if backend failed to reach internet
+        if (!roomFound) {
+          try {
+            const ntfyRes = await fetch(`https://ntfy.sh/wb-room-${cleanCode.toLowerCase()}/json?poll=1&since=24h`);
+            if (ntfyRes.ok) {
+              const text = await ntfyRes.text();
+              const lines = text.trim().split('\n').filter(Boolean);
+              for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                  const item = JSON.parse(lines[i]);
+                  const payload = typeof item.message === 'string' ? JSON.parse(item.message) : item.message;
+                  if (payload && payload.url) {
+                    const targetUrl = payload.url.replace(/\/$/, '');
+                    const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
+                      headers: { 'Bypass-Tunnel-Reminder': 'true' }
+                    });
+                    if (remoteRes.ok) {
+                      const remoteData = await remoteRes.json();
+                      if (remoteData.room) {
+                        roomFound = remoteData.room;
+                        setCustomServerHost(targetUrl);
+                        localStorage.setItem('whiteboard_custom_server', targetUrl);
+                        break;
+                      }
+                    }
+                  }
+                } catch (pe) {}
+              }
+            }
+          } catch (ne) {}
+        }
+      }
+
+      // Layer 3: UDP LAN Discovery (for "Without Internet" / Same Wi-Fi or Hotspot)
+      if (!roomFound && cleanCode && !extractedHost && !customHost) {
         try {
           const scanRes = await fetch('/api/lan/scan');
           if (scanRes.ok) {
@@ -229,7 +280,6 @@ export default function App() {
             if (scanData.discovered && scanData.discovered.length > 0) {
               for (const hostItem of scanData.discovered) {
                 if (hostItem.rooms && hostItem.rooms.some(r => r.code === cleanCode)) {
-                  // Found the room on this LAN host!
                   const targetUrl = hostItem.url.replace(/\/$/, '');
                   const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
                     headers: { 'Bypass-Tunnel-Reminder': 'true' }
@@ -247,21 +297,57 @@ export default function App() {
               }
             }
           }
-        } catch (scanErr) {
-          console.warn('[Auto LAN Discovery note]:', scanErr);
-        }
+        } catch (scanErr) {}
+      }
+
+      // Layer 4: Rapid Subnet HTTP Probe (Fallback for Wi-Fi routers blocking UDP broadcast)
+      if (!roomFound && cleanCode && !extractedHost && !customHost) {
+        try {
+          const probeRes = await fetch(`/api/lan/find-room/${cleanCode}`);
+          if (probeRes.ok) {
+            const probeData = await probeRes.json();
+            if (probeData.found && probeData.room && probeData.url) {
+              roomFound = probeData.room;
+              setCustomServerHost(probeData.url);
+              localStorage.setItem('whiteboard_custom_server', probeData.url);
+            }
+          }
+        } catch (pe) {}
       }
 
       if (!roomFound) {
         showNotice(
           'Room Not Found',
-          `Room "${cleanCode}" could not be located.\n\n` +
-          `• WITHOUT INTERNET: Ensure both laptops are connected to the exact same Wi-Fi router or Mobile Hotspot.\n` +
-          `• WITH INTERNET: Ask your host for their Public Share Link (or paste their public link here).`,
+          `Room "${cleanCode || 'Unknown'}" could not be located.\n\n` +
+          `• WITH INTERNET: Verify the 4-letter room code or ask the host for their Public Share Link.\n` +
+          `• WITHOUT INTERNET: Ensure both devices are connected to the exact same Wi-Fi router or Mobile Hotspot.`,
           'warning'
         );
         return;
       }
+
+      // Save to user's joined rooms history
+      try {
+        const stored = JSON.parse(localStorage.getItem('my_joined_rooms') || '[]');
+        if (!stored.some(r => r.code === roomFound.code)) {
+          const updated = [{ code: roomFound.code, title: roomFound.title, host_name: roomFound.host_name, joined_at: new Date().toISOString() }, ...stored];
+          localStorage.setItem('my_joined_rooms', JSON.stringify(updated.slice(0, 20)));
+        }
+      } catch (e) {}
+
+      // Log user activity to SQLite
+      try {
+        fetch('/api/user/log-activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_code: user?.user_code || 'GUEST',
+            room_code: roomFound.code,
+            action_type: 'JOIN_ROOM',
+            details: `Joined session "${roomFound.title}"`
+          })
+        }).catch(() => {});
+      } catch (e) {}
 
       const finalHost = extractedHost || customHost;
       if (finalHost) {

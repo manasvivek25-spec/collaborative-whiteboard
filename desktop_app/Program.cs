@@ -193,8 +193,8 @@ namespace CollaborativeWhiteboard
                 MinimizeBox = false
             };
 
-            Label textLabel = new Label() { Left = 20, Top = 18, Text = "Enter your friend's Host IP (e.g. 10.36.112.55 or 192.168.1.15):", Width = 400 };
-            TextBox textBox = new TextBox() { Left = 20, Top = 45, Width = 400, Text = "10.36.112.55:5000" };
+            Label textLabel = new Label() { Left = 20, Top = 18, Text = "Enter your friend's Host IP or Room Link:", Width = 400 };
+            TextBox textBox = new TextBox() { Left = 20, Top = 45, Width = 400, Text = "" };
             Button confirmation = new Button() { Text = "Connect to Whiteboard", Left = 240, Width = 180, Top = 85, DialogResult = DialogResult.OK };
             prompt.Controls.Add(textBox);
             prompt.Controls.Add(confirmation);

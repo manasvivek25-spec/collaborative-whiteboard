@@ -109,12 +109,22 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now', 'localtime'))
   );
 
+  CREATE TABLE IF NOT EXISTS user_activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_code TEXT NOT NULL,
+    room_code TEXT,
+    action_type TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_members_user ON room_members(user_code);
   CREATE INDEX IF NOT EXISTS idx_members_room ON room_members(room_code);
   CREATE INDEX IF NOT EXISTS idx_actions_room ON actions(room_code);
   CREATE INDEX IF NOT EXISTS idx_chat_room ON chat_messages(room_code);
   CREATE INDEX IF NOT EXISTS idx_milestones_room ON milestones(room_code);
   CREATE INDEX IF NOT EXISTS idx_public_works_room ON public_works(room_code);
+  CREATE INDEX IF NOT EXISTS idx_activity_user ON user_activity_logs(user_code);
 `);
 
 // Safe migrations for custom permissions
@@ -127,6 +137,7 @@ try { db.exec("ALTER TABLE rooms ADD COLUMN chat_perm TEXT DEFAULT 'everyone'");
 try { db.exec("ALTER TABLE rooms ADD COLUMN instances_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN public_work_perm TEXT DEFAULT 'everyone'"); } catch(e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN grid_style TEXT DEFAULT 'square'"); } catch(e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN network_mode TEXT DEFAULT 'hotspot'"); } catch(e) {}
 
 try { db.exec("ALTER TABLE milestones ADD COLUMN is_public INTEGER DEFAULT 1"); } catch(e) {}
 try { db.exec("ALTER TABLE milestones ADD COLUMN original_snapshot_json TEXT DEFAULT '[]'"); } catch(e) {}
@@ -196,19 +207,23 @@ export function getUserByEmail(email) {
 /**
  * Room Management
  */
-export function createRoom(code, title, hostUserCode, hostName, isPublic = true, password = null) {
+export function createRoom(code, title, hostUserCode, hostName, isPublic = true, password = null, networkMode = 'hotspot') {
   const cleanCode = code.trim().toUpperCase();
   const stmt = db.prepare(`
-    INSERT INTO rooms (code, title, host_user_code, host_name, is_public, password)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO rooms (code, title, host_user_code, host_name, is_public, password, network_mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(code) DO UPDATE SET
       title = excluded.title,
+      network_mode = excluded.network_mode,
       updated_at = datetime('now', 'localtime')
   `);
-  stmt.run(cleanCode, title.trim(), hostUserCode, hostName, isPublic ? 1 : 0, password);
+  stmt.run(cleanCode, title.trim(), hostUserCode, hostName, isPublic ? 1 : 0, password, networkMode || 'hotspot');
 
   // Enroll host in room members
   addRoomMember(cleanCode, hostUserCode, hostName, 'host', 1);
+
+  // Automatically record activity log
+  logUserActivity(hostUserCode, cleanCode, 'CREATE_ROOM', `Created ${networkMode === 'cloud' ? 'Internet' : 'LAN'} whiteboard "${title.trim()}"`);
 
   return getRoom(cleanCode);
 }
@@ -683,6 +698,42 @@ export function updateMemberCustomPermissions(roomCode, userCode, perms) {
   );
 }
 
+/**
+ * Persistent User Activity Logging
+ */
+export function logUserActivity(userCode, roomCode, actionType, details = '') {
+  try {
+    const cleanUser = (userCode || '').trim().toUpperCase();
+    if (!cleanUser) return;
+    const cleanRoom = roomCode ? roomCode.trim().toUpperCase() : null;
+    const stmt = db.prepare(`
+      INSERT INTO user_activity_logs (user_code, room_code, action_type, details)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(cleanUser, cleanRoom, actionType, details);
+  } catch (err) {
+    console.warn('[Activity Log DB note]:', err.message);
+  }
+}
+
+export function getUserActivityLogs(userCode, limit = 50) {
+  try {
+    const cleanUser = (userCode || '').trim().toUpperCase();
+    if (!cleanUser) return [];
+    const stmt = db.prepare(`
+      SELECT id, user_code, room_code, action_type, details, created_at
+      FROM user_activity_logs
+      WHERE UPPER(user_code) = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `);
+    return stmt.all(cleanUser, limit);
+  } catch (err) {
+    console.warn('[Activity Log DB note]:', err.message);
+    return [];
+  }
+}
+
 export default {
   createOrGetUser,
   getUserByCode,
@@ -720,6 +771,8 @@ export default {
   updateMilestoneHostSandbox,
   savePublicWork,
   getPublicWorks,
-  deletePublicWork
+  deletePublicWork,
+  logUserActivity,
+  getUserActivityLogs
 };
 

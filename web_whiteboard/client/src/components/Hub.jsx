@@ -566,42 +566,62 @@ export default function Hub({
               </div>
 
               {/* Discovered Rooms on Same LAN */}
-              {discoveredLanRooms.length > 0 && (
-                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2.5 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                      Active Whiteboards Discovered on Same LAN Subnet:
-                    </p>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/70 px-2 py-0.5 rounded-full">
-                      Zero Internet
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {discoveredLanRooms.map(item => (
-                      item.rooms.map(room => (
-                        <div key={`${item.ip}-${room.code}`} className="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between shadow-2xs hover:border-emerald-400 transition">
-                          <div>
-                            <p className="text-xs font-bold text-slate-900">{room.title}</p>
-                            <p className="text-[11px] text-slate-500 font-mono mt-0.5">
-                              Room Code: <strong className="text-blue-600 font-extrabold">{room.code}</strong> &bull; Host: {room.host_name}
-                            </p>
-                            <p className="text-[10px] text-emerald-700 font-mono">
-                              LAN IP: {item.ip}:{item.port}
-                            </p>
+              {(() => {
+                const validDiscoveredLanRooms = discoveredLanRooms.filter(item => {
+                  const isSelfIp = item.ip === '127.0.0.1' ||
+                                   item.ip === 'localhost' ||
+                                   item.ip === window.location.hostname ||
+                                   item.ip === netInfo?.primary_ip ||
+                                   (netInfo?.adapters || []).some(a => a.ip === item.ip);
+                  return !isSelfIp;
+                }).map(item => {
+                  const validRooms = (item.rooms || []).filter(room => {
+                    const isMyRoom = room.host_user_code === user?.user_code;
+                    const isInternetRoom = (room.title || '').toLowerCase().includes('internet') || room.network_mode === 'cloud';
+                    return !isMyRoom && !isInternetRoom;
+                  });
+                  return { ...item, rooms: validRooms };
+                }).filter(item => item.rooms.length > 0);
+
+                if (validDiscoveredLanRooms.length === 0) return null;
+
+                return (
+                  <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        Active Whiteboards Discovered on Same LAN Subnet:
+                      </p>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/70 px-2 py-0.5 rounded-full">
+                        Zero Internet
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {validDiscoveredLanRooms.map(item => (
+                        item.rooms.map(room => (
+                          <div key={`${item.ip}-${room.code}`} className="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between shadow-2xs hover:border-emerald-400 transition">
+                            <div>
+                              <p className="text-xs font-bold text-slate-900">{room.title}</p>
+                              <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                Room Code: <strong className="text-blue-600 font-extrabold">{room.code}</strong> &bull; Host: {room.host_name}
+                              </p>
+                              <p className="text-[10px] text-emerald-700 font-mono">
+                                LAN IP: {item.ip}:{item.port}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => handleJoinDirect(room.code, item.url)}
+                              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition shrink-0"
+                            >
+                              Join Now
+                            </button>
                           </div>
-                          <button
-                            onClick={() => handleJoinDirect(room.code, item.url)}
-                            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition shrink-0"
-                          >
-                            Join Now
-                          </button>
-                        </div>
-                      ))
-                    ))}
+                        ))
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Expandable Custom LAN / Hotspot IP Option for Joiner */}
               <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">

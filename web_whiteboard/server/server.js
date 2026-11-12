@@ -137,12 +137,18 @@ function startLanDiscoveryResponder() {
         if (payload.type === 'discover') {
           const adapters = getValidPhysicalAdapters();
           const hostIp = adapters.length > 0 ? adapters[0].ip : rinfo.address;
-          const publicRooms = db.getPublicRooms().map(r => ({
-            code: r.code,
-            title: r.title,
-            host_name: r.host_name,
-            users_count: r.users_count || 1
-          }));
+          // Only broadcast true LAN/hotspot rooms (exclude cloud / internet rooms)
+          const publicRooms = db.getPublicRooms()
+            .filter(r => r.network_mode !== 'cloud' && !(r.title || '').toLowerCase().includes('internet'))
+            .map(r => ({
+              code: r.code,
+              title: r.title,
+              host_name: r.host_name,
+              host_user_code: r.host_user_code,
+              users_count: r.users_count || 1
+            }));
+
+          if (publicRooms.length === 0) return;
 
           const reply = Buffer.from(JSON.stringify({
             type: 'discover_reply',
@@ -194,6 +200,26 @@ app.post('/api/internet/start-tunnel', async (req, res) => {
       activeTunnelUrl = null;
     });
     console.log('[Internet Mode] Public Tunnel established at:', activeTunnelUrl);
+
+    // Announce active cloud rooms to the global ntfy registry for instant 4-letter code lookups
+    try {
+      const cloudRooms = db.getPublicRooms().filter(r => r.network_mode === 'cloud' || (r.title || '').toLowerCase().includes('internet'));
+      cloudRooms.forEach(r => {
+        fetch(`https://ntfy.sh/wb-room-${r.code.toLowerCase()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            room: r.code,
+            url: activeTunnelUrl,
+            title: r.title,
+            host: r.host_name,
+            network_mode: 'cloud',
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+      });
+    } catch(e) {}
+
     res.json({ success: true, public_url: activeTunnelUrl });
   } catch (err) {
     console.error('[Internet Mode] Could not establish tunnel:', err.message);
@@ -231,25 +257,6 @@ app.get('/api/lan/scan', (req, res) => {
   const discovered = [];
   const seenUrls = new Set();
 
-  // Include this host's own public rooms
-  const localRooms = db.getPublicRooms();
-  if (localRooms.length > 0 && adapters.length > 0) {
-    discovered.push({
-      ip: adapters[0].ip,
-      port: PORT,
-      url: `http://${adapters[0].ip}:${PORT}`,
-      interface: adapters[0].interface,
-      type: adapters[0].type,
-      rooms: localRooms.map(r => ({
-        code: r.code,
-        title: r.title,
-        host_name: r.host_name,
-        users_count: r.users_count || 1
-      }))
-    });
-    seenUrls.add(`http://${adapters[0].ip}:${PORT}`);
-  }
-
   try {
     const client = dgram.createSocket('udp4');
     client.bind(0, () => {
@@ -269,7 +276,7 @@ app.get('/api/lan/scan', (req, res) => {
     client.on('message', (msg, rinfo) => {
       try {
         const data = JSON.parse(msg.toString());
-        if (data.type === 'discover_reply' && data.rooms) {
+        if (data.type === 'discover_reply' && data.rooms && data.rooms.length > 0) {
           const targetUrl = data.url || `http://${rinfo.address}:${data.port || PORT}`;
           if (!seenUrls.has(targetUrl)) {
             seenUrls.add(targetUrl);
@@ -379,7 +386,7 @@ app.get('/api/rooms', (req, res) => {
 
 // Create Room
 app.post('/api/rooms/create', (req, res) => {
-  const { title, hostUserCode, hostName, isPublic, password } = req.body;
+  const { title, hostUserCode, hostName, isPublic, password, networkMode } = req.body;
   if (!title || !hostUserCode) {
     return res.status(400).json({ error: 'Title and host user code are required' });
   }
@@ -395,11 +402,168 @@ app.post('/api/rooms/create', (req, res) => {
       if (!db.getRoom(code)) break;
     }
 
-    const room = db.createRoom(code, title, hostUserCode, hostName || 'Host', isPublic !== false, password);
+    const room = db.createRoom(
+      code,
+      title,
+      hostUserCode,
+      hostName || 'Host',
+      isPublic !== false,
+      password,
+      networkMode || 'hotspot'
+    );
+
+    // If cloud mode or active tunnel, register room in global registry
+    if (activeTunnelUrl || networkMode === 'cloud') {
+      try {
+        const tunnelTarget = activeTunnelUrl || '';
+        fetch(`https://ntfy.sh/wb-room-${code.toLowerCase()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            room: code,
+            url: tunnelTarget,
+            title: title.trim(),
+            host: hostName || 'Host',
+            network_mode: 'cloud',
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
     res.json({ success: true, room });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Resolve room across Localhost, Cloud Tunnel Registry, and Global Internet
+app.get('/api/rooms/resolve/:code', async (req, res) => {
+  const code = (req.params.code || '').trim().toUpperCase();
+  if (!code || code.length < 3) return res.status(400).json({ error: 'Invalid room code' });
+
+  // 1. Check local database
+  const localRoom = db.getRoom(code);
+  if (localRoom) {
+    return res.json({
+      success: true,
+      found: true,
+      mode: 'local',
+      url: '',
+      room: localRoom
+    });
+  }
+
+  // 2. Check cloud registry via ntfy.sh (for "With Internet" rooms across any network)
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    const ntfyRes = await fetch(`https://ntfy.sh/wb-room-${code.toLowerCase()}/json?poll=1&since=24h`, {
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+
+    if (ntfyRes.ok) {
+      const text = await ntfyRes.text();
+      const lines = text.trim().split('\n').filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const item = JSON.parse(lines[i]);
+          const payload = typeof item.message === 'string' ? JSON.parse(item.message) : item.message;
+          if (payload && payload.room && payload.room.toUpperCase() === code && payload.url) {
+            const verifyController = new AbortController();
+            const verifyTimeout = setTimeout(() => verifyController.abort(), 2000);
+            const remoteRes = await fetch(`${payload.url.replace(/\/$/, '')}/api/rooms/${code}`, {
+              headers: { 'Bypass-Tunnel-Reminder': 'true' },
+              signal: verifyController.signal
+            });
+            clearTimeout(verifyTimeout);
+            if (remoteRes.ok) {
+              const remoteData = await remoteRes.json();
+              return res.json({
+                success: true,
+                found: true,
+                mode: 'cloud',
+                url: payload.url,
+                room: remoteData.room
+              });
+            }
+          }
+        } catch (parseErr) {}
+      }
+    }
+  } catch (ntfyErr) {}
+
+  return res.json({ success: true, found: false });
+});
+
+// Rapid Subnet LAN Probe (Fallback if UDP broadcast is blocked by Wi-Fi router AP isolation)
+app.get('/api/lan/find-room/:code', async (req, res) => {
+  const code = (req.params.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'Code required' });
+
+  const adapters = getValidPhysicalAdapters();
+  const candidateIps = new Set();
+
+  ['192.168.43.1', '192.168.137.1', '192.168.1.1', '192.168.0.1', '10.0.0.1'].forEach(ip => candidateIps.add(ip));
+
+  for (const a of adapters) {
+    const parts = a.ip.split('.');
+    if (parts.length === 4) {
+      const prefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
+      candidateIps.add(`${prefix}.1`);
+      const currentLast = parseInt(parts[3], 10);
+      for (let offset = -8; offset <= 8; offset++) {
+        const targetLast = currentLast + offset;
+        if (targetLast > 0 && targetLast < 255 && targetLast !== currentLast) {
+          candidateIps.add(`${prefix}.${targetLast}`);
+        }
+      }
+    }
+  }
+
+  const probePromises = Array.from(candidateIps).map(async (ip) => {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 400);
+      const url = `http://${ip}:${PORT}`;
+      const probeRes = await fetch(`${url}/api/rooms/${code}`, {
+        headers: { 'Bypass-Tunnel-Reminder': 'true' },
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+      if (probeRes.ok) {
+        const data = await probeRes.json();
+        if (data.room) return { url, room: data.room, ip };
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const results = await Promise.all(probePromises);
+  const found = results.find(Boolean);
+  if (found) {
+    return res.json({ success: true, found: true, url: found.url, room: found.room, ip: found.ip });
+  }
+
+  res.json({ success: true, found: false });
+});
+
+// User Activity Logs API
+app.get('/api/user/:code/activity-logs', (req, res) => {
+  try {
+    const logs = db.getUserActivityLogs(req.params.code);
+    res.json({ success: true, logs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/user/log-activity', (req, res) => {
+  const { user_code, room_code, action_type, details } = req.body;
+  if (!user_code || !action_type) return res.status(400).json({ error: 'Missing parameters' });
+  db.logUserActivity(user_code, room_code, action_type, details);
+  res.json({ success: true });
 });
 
 // Get room details & full state snapshot

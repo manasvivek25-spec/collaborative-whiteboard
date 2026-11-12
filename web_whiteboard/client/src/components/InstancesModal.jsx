@@ -49,10 +49,13 @@ export default function InstancesModal({
     setActiveTab(saveDestination === 'public' ? 'list_public' : 'list_private');
   };
 
-  const publicList = milestones.filter(m => m.is_public !== false);
+  const safeMilestones = Array.isArray(milestones) ? milestones.filter(Boolean) : [];
+  const safePrivateMilestones = Array.isArray(privateMilestones) ? privateMilestones.filter(Boolean) : [];
+
+  const publicList = safeMilestones.filter(m => m && m.is_public !== false);
   const privateList = [
-    ...milestones.filter(m => m.is_public === false),
-    ...privateMilestones
+    ...safeMilestones.filter(m => m && m.is_public === false),
+    ...safePrivateMilestones
   ];
 
   return (
@@ -216,19 +219,25 @@ export default function InstancesModal({
                   );
                 }
 
-                return currentItems.map((ms) => {
-                  const actCount = Array.isArray(ms.snapshot) ? ms.snapshot.filter(a => !a.undone).length : 0;
+                return currentItems.map((ms, idx) => {
+                  if (!ms) return null;
+                  const msId = ms.id || `ms_${idx}`;
+                  const msTitle = ms.title || 'Untitled Instance';
+                  const msAuthor = ms.author_name || ms.author || 'User';
+                  const msTime = ms.timestamp || '';
+                  const snapshotList = Array.isArray(ms.snapshot) ? ms.snapshot : Array.isArray(ms.actions) ? ms.actions : [];
+                  const actCount = snapshotList.filter(a => a && !a.undone).length;
                   const isPublic = ms.is_public !== false;
                   const canDelete = isHost || ms.author_code === currentUserCode || !isPublic;
 
                   return (
                     <div
-                      key={ms.id}
+                      key={msId}
                       className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-white transition shadow-sm"
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-sm text-slate-900 truncate">{ms.title}</h4>
+                          <h4 className="font-bold text-sm text-slate-900 truncate">{msTitle}</h4>
                           <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold shrink-0 ${
                             isPublic ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-700'
                           }`}>
@@ -238,10 +247,10 @@ export default function InstancesModal({
                         <div className="flex flex-wrap items-center gap-2.5 text-[11px] text-slate-500 mt-1">
                           <span className="flex items-center gap-1 font-mono">
                             <Clock className="w-3 h-3 text-slate-400" />
-                            {ms.timestamp}
+                            {msTime}
                           </span>
                           <span>&bull;</span>
-                          <span>By: <strong className="text-slate-700">{ms.author_name || ms.author || 'User'}</strong></span>
+                          <span>By: <strong className="text-slate-700">{msAuthor}</strong></span>
                           <span>&bull;</span>
                           <span className="text-slate-400">{actCount} elements</span>
                         </div>
@@ -280,10 +289,8 @@ export default function InstancesModal({
                         {isHost ? (
                           <button
                             onClick={() => {
-                              if (window.confirm(`Restore canvas to instance "${ms.title}"?\nThis will update the live whiteboard for all session participants.`)) {
-                                onRestoreMilestone(ms.snapshot, ms.title);
-                                onClose();
-                              }
+                              onRestoreMilestone(snapshotList, msTitle);
+                              onClose();
                             }}
                             title="Host Action: Restore live collaborative canvas to this milestone"
                             className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"
@@ -305,9 +312,7 @@ export default function InstancesModal({
                         {canDelete && onDeleteMilestone && (
                           <button
                             onClick={() => {
-                              if (window.confirm(`Delete instance "${ms.title}"?`)) {
-                                onDeleteMilestone(ms.id, isPublic);
-                              }
+                              onDeleteMilestone(msId, isPublic);
                             }}
                             title="Delete this instance"
                             className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition"

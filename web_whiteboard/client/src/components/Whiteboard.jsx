@@ -9,6 +9,7 @@ import ShapesModal, { SHAPES_LIST } from './ShapesModal';
 import ExportModal from './ExportModal';
 import PublicWorksModal from './PublicWorksModal';
 import SaveDestinationModal from './SaveDestinationModal';
+import ErrorBoundary from './ErrorBoundary';
 import { recognizeInkStrokes } from '../utils/inkToFont';
 import {
   Users,
@@ -141,7 +142,17 @@ export default function Whiteboard({
     }
     return [];
   });
-  const [publicWorks, setPublicWorks] = useState([]);
+  const [publicWorks, setPublicWorks] = useState(() => {
+    if (isOffline) {
+      try {
+        const stored = localStorage.getItem(`offline_public_works_${room?.code || 'local'}`);
+        return stored ? JSON.parse(stored) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
   const [connectedUsers, setConnectedUsers] = useState([]);
   const [myPermissions, setMyPermissions] = useState({
     can_draw: true,
@@ -2170,6 +2181,23 @@ export default function Whiteboard({
             is_public: 1
           }));
           showNotification(`🌐 Published screenshot "${title}" to Public Works!`);
+        } else {
+          // Offline / Local Public Works
+          const offWork = {
+            id: `pw_off_${Date.now()}`,
+            title,
+            image_data: dataUrl,
+            is_public: true,
+            author_code: user?.user_code || 'local',
+            author_name: user?.name || 'Local User',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          };
+          setPublicWorks(prev => {
+            const next = [offWork, ...prev];
+            try { localStorage.setItem(`offline_public_works_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
+            return next;
+          });
+          showNotification(`🌐 Screenshot "${title}" saved to Public Works!`);
         }
       } else {
         // Save to My Own System (Private)
@@ -2210,6 +2238,25 @@ export default function Whiteboard({
             is_public: 1
           }));
           showNotification(`🌐 Published instance "${title}" to room Public Works!`);
+        } else {
+          // Offline / Local Public Instance
+          const offMs = {
+            id: `ms_off_${Date.now()}`,
+            title,
+            is_public: true,
+            author_code: user?.user_code || 'local',
+            author_name: user?.name || 'Local User',
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            snapshot: unUndoneActions,
+            original_snapshot: unUndoneActions,
+            host_sandbox: unUndoneActions
+          };
+          setMilestones(prev => {
+            const next = [offMs, ...prev];
+            try { localStorage.setItem(`offline_milestones_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
+            return next;
+          });
+          showNotification(`📌 Saved instance "${title}" to Public Works!`);
         }
       } else {
         // Save to My Own System (Private Instance)
@@ -2321,7 +2368,11 @@ export default function Whiteboard({
           id: workId
         }));
       }
-      setPublicWorks(prev => prev.filter(p => p.id !== workId));
+      setPublicWorks(prev => {
+        const next = prev.filter(p => p.id !== workId);
+        try { localStorage.setItem(`offline_public_works_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
+        return next;
+      });
       showNotification('Screenshot removed from Public Works');
     } else {
       setPrivateScreenshots(prev => {
@@ -2345,7 +2396,11 @@ export default function Whiteboard({
           id: milestoneId
         }));
       }
-      setMilestones(prev => prev.filter(m => m.id !== milestoneId));
+      setMilestones(prev => {
+        const next = prev.filter(m => m.id !== milestoneId);
+        try { localStorage.setItem(`offline_milestones_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
+        return next;
+      });
       showNotification('Instance removed from Public Works');
     } else {
       setPrivateMilestones(prev => {
@@ -3001,47 +3056,51 @@ export default function Whiteboard({
         onShareWithMember={handleShareWithMember}
       />
 
-      <InstancesModal
-        isOpen={isMilestonesOpen}
-        onClose={() => setIsMilestonesOpen(false)}
-        milestones={milestones}
-        privateMilestones={privateMilestones}
-        onSaveMilestone={handlePublishMilestone}
-        onShowInstance={(ms) => {
-          setViewingInstance({
-            id: ms.id,
-            title: ms.title,
-            actions: JSON.parse(JSON.stringify(ms.snapshot || [])),
-            original_snapshot: JSON.parse(JSON.stringify(ms.original_snapshot || ms.snapshot || [])),
-            host_sandbox: ms.host_sandbox ? JSON.parse(JSON.stringify(ms.host_sandbox)) : null,
-            is_public: ms.is_public !== false
-          });
-          setSandboxViewMode('sandbox');
-          showNotification(`👁️ Sandboxed in instance "${ms.title}". Edits do not modify live canvas.`);
-        }}
-        onBroadcastShow={handleBroadcastShowInstance}
-        onRestoreMilestone={(snapshot, title) => {
-          handleRestoreMilestone(snapshot, title);
-        }}
-        onDeleteMilestone={handleDeleteMilestone}
-        canRestore={isHost}
-        canSave={isHost || isCohost || myPermissions.can_instances !== false}
-        canSharePublic={isHost || myPermissions.can_instances !== false}
-        currentUserCode={user?.user_code}
-        isHost={isHost}
-      />
+      <ErrorBoundary fallbackTitle="Instances Modal">
+        <InstancesModal
+          isOpen={isMilestonesOpen}
+          onClose={() => setIsMilestonesOpen(false)}
+          milestones={milestones}
+          privateMilestones={privateMilestones}
+          onSaveMilestone={handlePublishMilestone}
+          onShowInstance={(ms) => {
+            setViewingInstance({
+              id: ms.id,
+              title: ms.title,
+              actions: JSON.parse(JSON.stringify(ms.snapshot || [])),
+              original_snapshot: JSON.parse(JSON.stringify(ms.original_snapshot || ms.snapshot || [])),
+              host_sandbox: ms.host_sandbox ? JSON.parse(JSON.stringify(ms.host_sandbox)) : null,
+              is_public: ms.is_public !== false
+            });
+            setSandboxViewMode('sandbox');
+            showNotification(`👁️ Sandboxed in instance "${ms.title}". Edits do not modify live canvas.`);
+          }}
+          onBroadcastShow={handleBroadcastShowInstance}
+          onRestoreMilestone={(snapshot, title) => {
+            handleRestoreMilestone(snapshot, title);
+          }}
+          onDeleteMilestone={handleDeleteMilestone}
+          canRestore={isHost}
+          canSave={isHost || isCohost || myPermissions.can_instances !== false}
+          canSharePublic={isHost || myPermissions.can_instances !== false}
+          currentUserCode={user?.user_code}
+          isHost={isHost}
+        />
+      </ErrorBoundary>
 
-      <PublicWorksModal
-        isOpen={isPublicWorksOpen}
-        onClose={() => setIsPublicWorksOpen(false)}
-        publicWorks={publicWorks}
-        privateWorks={privateScreenshots}
-        onDeleteWork={handleDeletePublicWork}
-        currentUserCode={user?.user_code}
-        isHost={isHost}
-        canDelete={isHost || isCohost}
-        onOpenExportModal={() => setIsExportModalOpen(true)}
-      />
+      <ErrorBoundary fallbackTitle="Public Works Modal">
+        <PublicWorksModal
+          isOpen={isPublicWorksOpen}
+          onClose={() => setIsPublicWorksOpen(false)}
+          publicWorks={publicWorks}
+          privateWorks={privateScreenshots}
+          onDeleteWork={handleDeletePublicWork}
+          currentUserCode={user?.user_code}
+          isHost={isHost}
+          canDelete={isHost || isCohost}
+          onOpenExportModal={() => setIsExportModalOpen(true)}
+        />
+      </ErrorBoundary>
 
       <AddMemberModal
         isOpen={isAddMemberOpen}

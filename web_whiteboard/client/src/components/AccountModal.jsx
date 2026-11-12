@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { User, Mail, Sparkles, Copy, Check, ShieldCheck, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { User, Mail, Sparkles, Copy, Check, ShieldCheck, X, Clock, Activity } from 'lucide-react';
 
 const PRESET_COLORS = [
   '#0284c7', '#2563eb', '#7c3aed', '#db2777', 
@@ -14,6 +14,21 @@ export default function AccountModal({ user, onSave, onClose, isEditing = false 
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
+
+  useEffect(() => {
+    if (user?.user_code) {
+      fetch(`/api/user/${user.user_code}/activity-logs`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.success && Array.isArray(d.logs)) {
+            setActivityLogs(d.logs);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user?.user_code]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -198,6 +213,55 @@ export default function AccountModal({ user, onSave, onClose, isEditing = false 
               {loading ? 'Saving...' : isEditing ? 'Update Account' : 'Generate Account & Code'}
             </button>
           </div>
+
+          {/* Stored User Activity Logs */}
+          {user?.user_code && (
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowLogs(!showLogs)}
+                className="w-full py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center justify-between transition"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-blue-600" />
+                  Stored Activity & Session Logs ({activityLogs.length})
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {showLogs ? '▲ Hide' : '▼ View'}
+                </span>
+              </button>
+
+              {showLogs && (
+                <div className="mt-2 max-h-40 overflow-y-auto space-y-1.5 pr-1 animate-fade-in">
+                  {activityLogs.length === 0 ? (
+                    <p className="text-[11px] text-slate-400 text-center py-2">
+                      No session activity logged yet.
+                    </p>
+                  ) : (
+                    activityLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] flex flex-col gap-0.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-800 font-mono">
+                            {log.action_type}
+                          </span>
+                          <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                            <Clock className="w-2.5 h-2.5" />
+                            {log.created_at || ''}
+                          </span>
+                        </div>
+                        <p className="text-slate-600 text-[10px] leading-tight">
+                          {log.details}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </form>
       </div>
     </div>

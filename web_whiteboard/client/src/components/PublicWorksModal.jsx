@@ -28,15 +28,19 @@ export default function PublicWorksModal({
 
   if (!isOpen) return null;
 
-  const publicList = publicWorks.filter(w => w.is_public !== false);
+  const safePublicWorks = Array.isArray(publicWorks) ? publicWorks.filter(Boolean) : [];
+  const safePrivateWorks = Array.isArray(privateWorks) ? privateWorks.filter(Boolean) : [];
+
+  const publicList = safePublicWorks.filter(w => w && w.is_public !== false);
   const privateList = [
-    ...publicWorks.filter(w => w.is_public === false),
-    ...privateWorks
+    ...safePublicWorks.filter(w => w && w.is_public === false),
+    ...safePrivateWorks
   ];
 
   const currentList = activeTab === 'public' ? publicList : privateList;
 
   const handleDownload = (work) => {
+    if (!work || !work.image_data) return;
     const a = document.createElement('a');
     a.href = work.image_data;
     a.download = `${(work.title || 'screenshot').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
@@ -141,13 +145,18 @@ export default function PublicWorksModal({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {currentList.map((work) => {
+              {currentList.map((work, idx) => {
+                if (!work) return null;
+                const workId = work.id || `work_${idx}`;
+                const workTitle = work.title || 'Untitled Snapshot';
+                const workAuthor = work.author_name || 'User';
+                const workTime = work.timestamp || '';
                 const isPublic = work.is_public !== false;
                 const canDelete = isHost || work.author_code === currentUserCode || !isPublic;
 
                 return (
                   <div
-                    key={work.id}
+                    key={workId}
                     className="group bg-white rounded-2xl border border-slate-200 hover:border-violet-300 hover:shadow-md transition overflow-hidden flex flex-col"
                   >
                     {/* Image Preview Box */}
@@ -156,8 +165,8 @@ export default function PublicWorksModal({
                       className="relative h-44 bg-slate-100 border-b border-slate-100 overflow-hidden cursor-pointer"
                     >
                       <img
-                        src={work.image_data}
-                        alt={work.title}
+                        src={work.image_data || ''}
+                        alt={workTitle}
                         className="w-full h-full object-contain p-2 group-hover:scale-102 transition duration-200"
                       />
                       <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
@@ -172,8 +181,8 @@ export default function PublicWorksModal({
                     <div className="p-3.5 flex flex-col justify-between flex-1 gap-2">
                       <div>
                         <div className="flex items-center justify-between gap-1">
-                          <h4 className="font-bold text-xs text-slate-800 truncate" title={work.title}>
-                            {work.title}
+                          <h4 className="font-bold text-xs text-slate-800 truncate" title={workTitle}>
+                            {workTitle}
                           </h4>
                           <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
                             isPublic ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-600'
@@ -184,11 +193,11 @@ export default function PublicWorksModal({
                         <div className="flex items-center justify-between text-[11px] text-slate-400 mt-1">
                           <span className="flex items-center gap-1 font-medium text-slate-600">
                             <User className="w-3 h-3 text-violet-500" />
-                            {work.author_name}
+                            {workAuthor}
                           </span>
                           <span className="flex items-center gap-1 font-mono text-[10px]">
                             <Clock className="w-3 h-3" />
-                            {work.timestamp}
+                            {workTime}
                           </span>
                         </div>
                       </div>
@@ -205,9 +214,7 @@ export default function PublicWorksModal({
                         {canDelete && (
                           <button
                             onClick={() => {
-                              if (window.confirm(`Delete snapshot "${work.title}"?`)) {
-                                onDeleteWork(work.id, isPublic);
-                              }
+                              if (onDeleteWork) onDeleteWork(workId, isPublic);
                             }}
                             title="Delete this snapshot"
                             className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition"
