@@ -10,6 +10,7 @@ import ExportModal from './ExportModal';
 import PublicWorksModal from './PublicWorksModal';
 import SaveDestinationModal from './SaveDestinationModal';
 import ErrorBoundary from './ErrorBoundary';
+import PromptModal from './PromptModal';
 import { recognizeInkStrokes } from '../utils/inkToFont';
 import {
   Users,
@@ -36,7 +37,8 @@ import {
   Sparkles,
   Globe,
   HardDrive,
-  Sliders
+  Sliders,
+  Crop
 } from 'lucide-react';
 
 export default function Whiteboard({
@@ -96,8 +98,30 @@ export default function Whiteboard({
 
   // Selection & Manipulation State
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectionBox, setSelectionBox] = useState(null); // { startX, startY, currentX, currentY }
   const [selectedDrag, setSelectedDrag] = useState(null);
   const [selectedResize, setSelectedResize] = useState(null);
+
+  // Snap Area Screenshot Tool State
+  const [snapBox, setSnapBox] = useState(null); // { startX, startY, currentX, currentY }
+  const [customSnapDataUrl, setCustomSnapDataUrl] = useState(null);
+
+  // Custom Prompt Modal State (Replaces native window.prompt)
+  const [promptConfig, setPromptConfig] = useState(null); // { isOpen, title, message, initialValue, onConfirm }
+  const showPrompt = useCallback((title, message, initialValue, onConfirm) => {
+    setPromptConfig({
+      isOpen: true,
+      title,
+      message,
+      initialValue: initialValue || '',
+      onConfirm: (val) => {
+        onConfirm(val);
+        setPromptConfig(null);
+      },
+      onClose: () => setPromptConfig(null)
+    });
+  }, []);
 
   // Infinite Pan Interaction State
   const [isPanning, setIsPanning] = useState(false);
@@ -820,8 +844,101 @@ export default function Whiteboard({
       renderAction(ctx, previewAct);
     }
 
-    // Render generic selection outline & handles if an item is selected
-    if (selectedId) {
+    // Render selection drag marquee box
+    if (selectionBox) {
+      const bx = Math.min(selectionBox.startX, selectionBox.currentX);
+      const by = Math.min(selectionBox.startY, selectionBox.currentY);
+      const bw = Math.abs(selectionBox.currentX - selectionBox.startX);
+      const bh = Math.abs(selectionBox.currentY - selectionBox.startY);
+      ctx.save();
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.12)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = '#2563eb';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.restore();
+    }
+
+    // Render Snap Area Screenshot Box
+    if (snapBox) {
+      const cx = Math.min(snapBox.startX, snapBox.currentX);
+      const cy = Math.min(snapBox.startY, snapBox.currentY);
+      const cw = Math.abs(snapBox.currentX - snapBox.startX);
+      const ch = Math.abs(snapBox.currentY - snapBox.startY);
+
+      ctx.save();
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 3]);
+      ctx.strokeRect(cx, cy, cw, ch);
+      ctx.setLineDash([]);
+
+      const dimText = `✂️ ${Math.round(cw)} × ${Math.round(ch)} px`;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.beginPath();
+      const pillY = cy + ch + 8;
+      if (ctx.roundRect) ctx.roundRect(cx, pillY, 110, 22, [6]);
+      else ctx.rect(cx, pillY, 110, 22);
+      ctx.fill();
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = 'bold 11px Inter, sans-serif';
+      ctx.fillText(dimText, cx + 8, pillY + 15);
+      ctx.restore();
+    }
+
+    // Render group selection outline & handles if multiple items are selected
+    if (selectedIds && selectedIds.length > 1) {
+      const bboxes = selectedIds.map(id => {
+        const a = currentDisplayActions.find(act => act.id === id && !act.undone);
+        return a ? getActionBBox(a) : null;
+      }).filter(Boolean);
+
+      if (bboxes.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        bboxes.forEach(b => {
+          if (b.x < minX) minX = b.x;
+          if (b.y < minY) minY = b.y;
+          if (b.x + b.w > maxX) maxX = b.x + b.w;
+          if (b.y + b.h > maxY) maxY = b.y + b.h;
+        });
+        const groupW = maxX - minX;
+        const groupH = maxY - minY;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(37, 99, 235, 0.45)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        bboxes.forEach(b => {
+          ctx.strokeRect(b.x - 2, b.y - 2, b.w + 4, b.h + 4);
+        });
+
+        ctx.strokeStyle = '#2563eb';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(minX - 6, minY - 6, groupW + 12, groupH + 12);
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#2563eb';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(minX - 6, minY - 32, 95, 22, [6]);
+        else ctx.rect(minX - 6, minY - 32, 95, 22);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText(`✥ Move (${selectedIds.length})`, minX + 2, minY - 17);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(minX + groupW - 14, minY - 32, 22, 22, [6]);
+        else ctx.rect(minX + groupW - 14, minY - 32, 22, 22);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px Inter, sans-serif';
+        ctx.fillText('✕', minX + groupW - 8, minY - 17);
+        ctx.restore();
+      }
+    } else if (selectedId) {
       const selAct = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
       if (selAct && selAct.kind !== 'table') {
         const bbox = getActionBBox(selAct);
@@ -865,7 +982,7 @@ export default function Whiteboard({
     }
 
     ctx.restore();
-  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, fillShape, fillColor, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId]);
+  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, fillShape, fillColor, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId, selectedIds, selectionBox, snapBox]);
 
   useEffect(() => {
     redrawCanvas();
@@ -1296,17 +1413,18 @@ export default function Whiteboard({
           const c = Math.floor((x - tbl.x0) / cellW);
 
           const currentVal = tbl.cells?.[`${r},${c}`] || '';
-          const newVal = prompt(`Edit Table Cell (Row ${r + 1}, Col ${c + 1}):`, currentVal);
-          if (newVal !== null && newVal !== currentVal) {
-            const updatedTable = {
-              ...tbl,
-              cells: {
-                ...(tbl.cells || {}),
-                [`${r},${c}`]: newVal
-              }
-            };
-            commitAction(updatedTable);
-          }
+          showPrompt(`Edit Table Cell (Row ${r + 1}, Col ${c + 1})`, '', currentVal, (newVal) => {
+            if (newVal !== null && newVal !== currentVal) {
+              const updatedTable = {
+                ...tbl,
+                cells: {
+                  ...(tbl.cells || {}),
+                  [`${r},${c}`]: newVal
+                }
+              };
+              commitAction(updatedTable);
+            }
+          });
         }
         setTableDrag(null);
         setIsDrawing(false);
@@ -1334,10 +1452,11 @@ export default function Whiteboard({
       // 2. Edit button [st.x + 90, st.y - 26, 48, 20]
       if (x >= st.x + 90 && x <= st.x + 138 && y >= st.y - 26 && y <= st.y - 6) {
         if (myPermissions.can_draw) {
-          const newText = prompt('Edit Note Text:', st.text || '');
-          if (newText !== null && newText !== st.text) {
-            commitAction({ ...st, text: newText });
-          }
+          showPrompt('Edit Sticky Note', '', st.text || '', (newText) => {
+            if (newText !== null && newText !== st.text) {
+              commitAction({ ...st, text: newText });
+            }
+          });
         }
         return;
       }
@@ -1375,10 +1494,11 @@ export default function Whiteboard({
       if (x >= st.x && x <= st.x + stW && y >= st.y && y <= st.y + stH) {
         setSelectedId(st.id);
         if (e.detail === 2 && myPermissions.can_draw) {
-          const newText = prompt('Edit Note Text:', st.text || '');
-          if (newText !== null && newText !== st.text) {
-            commitAction({ ...st, text: newText });
-          }
+          showPrompt('Edit Sticky Note', '', st.text || '', (newText) => {
+            if (newText !== null && newText !== st.text) {
+              commitAction({ ...st, text: newText });
+            }
+          });
         }
         setStickyDrag(null);
         setIsDrawing(false);
@@ -1386,8 +1506,59 @@ export default function Whiteboard({
       }
     }
 
+    // ── SNAP AREA SCREENSHOT TOOL ───────────────────────────────────────
+    if (activeTool === 'snap') {
+      setSnapBox({ startX: x, startY: y, currentX: x, currentY: y });
+      return;
+    }
+
     // ── GENERIC SELECTION TOOL INTERACTION ───────────────────────────────
     if (activeTool === 'select') {
+      // Group interaction if multiple elements selected
+      if (selectedIds && selectedIds.length > 1) {
+        const bboxes = selectedIds.map(id => {
+          const a = currentDisplayActions.find(act => act.id === id && !act.undone);
+          return a ? getActionBBox(a) : null;
+        }).filter(Boolean);
+
+        if (bboxes.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          bboxes.forEach(b => {
+            if (b.x < minX) minX = b.x;
+            if (b.y < minY) minY = b.y;
+            if (b.x + b.w > maxX) maxX = b.x + b.w;
+            if (b.y + b.h > maxY) maxY = b.y + b.h;
+          });
+          const groupW = maxX - minX;
+
+          // Check click on group delete button
+          if (x >= minX + groupW - 14 && x <= minX + groupW + 8 && y >= minY - 32 && y <= minY - 10) {
+            selectedIds.forEach(id => {
+              const act = currentDisplayActions.find(a => a.id === id);
+              if (act) commitAction({ ...act, undone: true });
+            });
+            showNotification(`${selectedIds.length} items deleted`);
+            setSelectedIds([]);
+            setSelectedId(null);
+            return;
+          }
+
+          // Check click on group move pill or inside group bounds
+          const insideGroup = (x >= minX - 6 && x <= maxX + 6 && y >= minY - 32 && y <= maxY + 6);
+          if (insideGroup) {
+            setSelectedDrag({
+              items: selectedIds.map(id => {
+                const act = currentDisplayActions.find(a => a.id === id);
+                return act ? { id: act.id, act: JSON.parse(JSON.stringify(act)) } : null;
+              }).filter(Boolean),
+              startX: x,
+              startY: y
+            });
+            return;
+          }
+        }
+      }
+
       if (selectedId) {
         const selAct = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
         if (selAct) {
@@ -1397,6 +1568,7 @@ export default function Whiteboard({
             if (x >= bbox.x + bbox.w - 20 && x <= bbox.x + bbox.w && y >= bbox.y - 26 && y <= bbox.y - 6) {
               commitAction({ ...selAct, undone: true });
               setSelectedId(null);
+              setSelectedIds([]);
               showNotification('Item deleted');
               return;
             }
@@ -1405,9 +1577,9 @@ export default function Whiteboard({
             if (x >= bbox.x && x <= bbox.x + 64 && y >= bbox.y - 26 && y <= bbox.y - 6) {
               setSelectedDrag({
                 id: selAct.id,
+                items: [{ id: selAct.id, act: JSON.parse(JSON.stringify(selAct)) }],
                 startX: x,
-                startY: y,
-                act: JSON.parse(JSON.stringify(selAct))
+                startY: y
               });
               return;
             }
@@ -1440,33 +1612,42 @@ export default function Whiteboard({
         }
       }
 
-      setSelectedId(hitId);
       if (hitId) {
+        setSelectedId(hitId);
+        setSelectedIds([hitId]);
         const hitAct = currentDisplayActions.find(a => a.id === hitId);
         // Double click on text to edit
         if (hitAct && hitAct.kind === 'text' && e.detail === 2) {
           if (myPermissions.can_draw || viewingInstance) {
-            const newText = prompt('Edit Text:', hitAct.text || '');
-            if (newText !== null && newText !== hitAct.text) {
-              commitAction({ ...hitAct, text: newText });
-            }
+            showPrompt('Edit Canvas Text', '', hitAct.text || '', (newText) => {
+              if (newText !== null && newText !== hitAct.text) {
+                commitAction({ ...hitAct, text: newText });
+              }
+            });
           }
           return;
         }
 
         setSelectedDrag({
           id: hitId,
+          items: [{ id: hitId, act: JSON.parse(JSON.stringify(hitAct)) }],
           startX: x,
-          startY: y,
-          act: JSON.parse(JSON.stringify(hitAct))
+          startY: y
         });
+        return;
       }
+
+      // Clicked on empty space: clear selection and start drag-selection marquee
+      setSelectedId(null);
+      setSelectedIds([]);
+      setSelectionBox({ startX: x, startY: y, currentX: x, currentY: y });
       return;
     }
 
     // Unselect if clicked elsewhere
     if (selectedTableId) setSelectedTableId(null);
     if (selectedId) setSelectedId(null);
+    if (selectedIds.length > 0) setSelectedIds([]);
 
     // Permission Enforcement
     if (!myPermissions.can_draw) {
@@ -1503,39 +1684,44 @@ export default function Whiteboard({
     } else if (activeTool === 'shape') {
       setShapeStart({ x, y });
     } else if (activeTool === 'text') {
-      const text = prompt('Enter text for canvas:');
-      if (text) {
-        const textAction = {
-          id: `text_${Date.now()}`,
-          kind: 'text',
-          text,
-          x,
-          y,
-          color: strokeColor,
-          fontSize: activeFontSize || 24,
-          fontFamily: activeFontFamily || 'Inter, sans-serif',
-          bold: activeFontBold,
-          italic: activeFontItalic
-        };
-        commitAction(textAction);
-        setSelectedId(textAction.id);
-      }
+      showPrompt('Add Text to Canvas', '', '', (text) => {
+        if (text && text.trim()) {
+          const textAction = {
+            id: `text_${Date.now()}`,
+            kind: 'text',
+            text: text.trim(),
+            x,
+            y,
+            color: strokeColor,
+            fontSize: activeFontSize || 24,
+            fontFamily: activeFontFamily || 'Inter, sans-serif',
+            bold: activeFontBold,
+            italic: activeFontItalic
+          };
+          commitAction(textAction);
+          setSelectedId(textAction.id);
+          setSelectedIds([textAction.id]);
+        }
+      });
       setIsDrawing(false);
     } else if (activeTool === 'sticky') {
-      const text = prompt('Enter note text:');
-      if (text) {
-        const stickyAction = {
-          id: `sticky_${Date.now()}`,
-          kind: 'sticky',
-          text,
-          x,
-          y,
-          w: 160,
-          h: 120,
-          bgColor: '#fef08a'
-        };
-        commitAction(stickyAction);
-      }
+      showPrompt('Create Sticky Note', '', '', (text) => {
+        if (text && text.trim()) {
+          const stickyAction = {
+            id: `sticky_${Date.now()}`,
+            kind: 'sticky',
+            text: text.trim(),
+            x,
+            y,
+            w: 160,
+            h: 120,
+            bgColor: '#fef08a'
+          };
+          commitAction(stickyAction);
+          setSelectedId(stickyAction.id);
+          setSelectedIds([stickyAction.id]);
+        }
+      });
       setIsDrawing(false);
     }
   };
@@ -1654,14 +1840,33 @@ export default function Whiteboard({
       return;
     }
 
-    // Handle Generic Selected Dragging
+    // Handle Snap Area Screenshot Box Dragging
+    if (snapBox) {
+      setSnapBox(prev => prev ? { ...prev, currentX: x, currentY: y } : null);
+      return;
+    }
+
+    // Handle Selection Marquee Box Dragging
+    if (selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, currentX: x, currentY: y } : null);
+      return;
+    }
+
+    // Handle Generic Selected Dragging (Single or Multi-item Group)
     if (selectedDrag) {
       const dx = x - selectedDrag.startX;
       const dy = y - selectedDrag.startY;
-      const orig = selectedDrag.act;
+
+      const itemsMap = new Map();
+      if (selectedDrag.items && selectedDrag.items.length > 0) {
+        selectedDrag.items.forEach(it => itemsMap.set(it.id, it.act));
+      } else if (selectedDrag.id && selectedDrag.act) {
+        itemsMap.set(selectedDrag.id, selectedDrag.act);
+      }
 
       const updateFn = (list) => list.map(a => {
-        if (a.id === selectedDrag.id) {
+        const orig = itemsMap.get(a.id);
+        if (orig) {
           if (orig.kind === 'table') {
             return { ...a, x0: orig.x0 + dx, y0: orig.y0 + dy, x1: orig.x1 + dx, y1: orig.y1 + dy };
           }
@@ -1755,6 +1960,55 @@ export default function Whiteboard({
       return;
     }
 
+    if (snapBox) {
+      const cropX = Math.min(snapBox.startX, snapBox.currentX);
+      const cropY = Math.min(snapBox.startY, snapBox.currentY);
+      const cropW = Math.abs(snapBox.currentX - snapBox.startX);
+      const cropH = Math.abs(snapBox.currentY - snapBox.startY);
+      if (cropW > 12 && cropH > 12) {
+        const dataUrl = captureAreaScreenshotDataUrl(cropX, cropY, cropW, cropH);
+        if (dataUrl) {
+          setCustomSnapDataUrl(dataUrl);
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).replace(/:/g, '-');
+          setSaveModalConfig({
+            mode: 'screenshot',
+            defaultTitle: `Area_Snap_${timeStr}`
+          });
+        }
+      }
+      setSnapBox(null);
+      setActiveTool('select');
+      return;
+    }
+
+    if (selectionBox) {
+      const minX = Math.min(selectionBox.startX, selectionBox.currentX);
+      const maxX = Math.max(selectionBox.startX, selectionBox.currentX);
+      const minY = Math.min(selectionBox.startY, selectionBox.currentY);
+      const maxY = Math.max(selectionBox.startY, selectionBox.currentY);
+      const boxW = maxX - minX;
+      const boxH = maxY - minY;
+
+      if (boxW > 5 || boxH > 5) {
+        const matched = [];
+        for (const act of currentDisplayActions) {
+          if (act.undone) continue;
+          const b = getActionBBox(act);
+          if (b) {
+            const intersects = !(b.x > maxX || b.x + b.w < minX || b.y > maxY || b.y + b.h < minY);
+            if (intersects) matched.push(act.id);
+          }
+        }
+        setSelectedIds(matched);
+        setSelectedId(matched[0] || null);
+        if (matched.length > 0) {
+          showNotification(`Selected ${matched.length} element${matched.length > 1 ? 's' : ''}`);
+        }
+      }
+      setSelectionBox(null);
+      return;
+    }
+
     if (tableResize) {
       const modified = currentDisplayActions.find(a => a.id === tableResize.id);
       if (modified) commitAction(modified);
@@ -1784,8 +2038,15 @@ export default function Whiteboard({
     }
 
     if (selectedDrag) {
-      const modified = currentDisplayActions.find(a => a.id === selectedDrag.id);
-      if (modified) commitAction(modified);
+      if (selectedDrag.items && selectedDrag.items.length > 0) {
+        selectedDrag.items.forEach(item => {
+          const modified = currentDisplayActions.find(a => a.id === item.id);
+          if (modified) commitAction(modified);
+        });
+      } else if (selectedDrag.id) {
+        const modified = currentDisplayActions.find(a => a.id === selectedDrag.id);
+        if (modified) commitAction(modified);
+      }
       setSelectedDrag(null);
       return;
     }
@@ -2156,6 +2417,31 @@ export default function Whiteboard({
   };
 
   // ── SCREENSHOT / EXPORT / PUBLIC WORKS ─────────────────────────────
+  const captureAreaScreenshotDataUrl = (cropLeft, cropTop, cropW, cropH) => {
+    if (cropW < 10 || cropH < 10) return null;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = Math.max(1, Math.round(cropW));
+    offscreen.height = Math.max(1, Math.round(cropH));
+    const oCtx = offscreen.getContext('2d');
+    if (!oCtx) return null;
+
+    // 1. Solid crisp white background
+    oCtx.fillStyle = '#ffffff';
+    oCtx.fillRect(0, 0, offscreen.width, offscreen.height);
+
+    // 2. Render all visible elements shifted by (-cropLeft, -cropTop)
+    oCtx.save();
+    oCtx.translate(-cropLeft, -cropTop);
+    for (const act of currentDisplayActions) {
+      if (!act.undone) {
+        renderAction(oCtx, act);
+      }
+    }
+    oCtx.restore();
+
+    return offscreen.toDataURL('image/png');
+  };
+
   const captureScreenshotDataUrl = () => {
     const bgCanvas = bgCanvasRef.current;
     const canvas = canvasRef.current;
@@ -2202,7 +2488,8 @@ export default function Whiteboard({
     const mode = forcedMode || saveModalConfig?.mode || 'instance';
 
     if (mode === 'screenshot') {
-      const dataUrl = captureScreenshotDataUrl();
+      const dataUrl = customSnapDataUrl || captureScreenshotDataUrl();
+      setCustomSnapDataUrl(null);
       if (!dataUrl) return;
 
       const workId = `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -2388,19 +2675,31 @@ export default function Whiteboard({
     if (!selectedId) return;
     const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
     if (act && act.kind === 'text') {
-      const newText = prompt('Edit Text Content:', act.text || '');
-      if (newText !== null && newText !== act.text) {
-        commitAction({ ...act, text: newText });
-      }
+      showPrompt('Edit Text Content', '', act.text || '', (newText) => {
+        if (newText !== null && newText !== act.text) {
+          commitAction({ ...act, text: newText });
+        }
+      });
     }
   };
 
   const handleDeleteSelected = () => {
-    if (!selectedId) return;
-    const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
-    if (act) {
-      commitAction({ ...act, undone: true });
+    if (selectedIds && selectedIds.length > 0) {
+      selectedIds.forEach(id => {
+        const act = currentDisplayActions.find(a => a.id === id && !a.undone);
+        if (act) commitAction({ ...act, undone: true });
+      });
+      showNotification(`${selectedIds.length} item${selectedIds.length > 1 ? 's' : ''} deleted`);
+      setSelectedIds([]);
       setSelectedId(null);
+      return;
+    }
+    if (selectedId) {
+      const act = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
+      if (act) {
+        commitAction({ ...act, undone: true });
+        setSelectedId(null);
+      }
     }
   };
 
@@ -3099,6 +3398,7 @@ export default function Whiteboard({
         canSaveMilestone={isHost || isCohost || myPermissions.can_instances !== false}
         canPublishPublicWork={isHost || isCohost || myPermissions.can_public_work !== false}
         onTakeScreenshot={handleTakeScreenshot}
+        onStartAreaSnap={() => setActiveTool('snap')}
         onPublishMilestone={handlePublishMilestone}
         onPublishPublicWork={handlePublishPublicWork}
         onShareWithMember={handleShareWithMember}
@@ -3167,6 +3467,30 @@ export default function Whiteboard({
           : (isHost || myPermissions.can_instances !== false)}
         defaultTitle={saveModalConfig?.defaultTitle}
         onConfirm={handleConfirmSaveDestination}
+      />
+
+      {/* Snap Area Screenshot Floating Helper Banner */}
+      {activeTool === 'snap' && (
+        <div className="fixed top-20 sm:top-24 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-slate-900/90 text-white rounded-full shadow-2xl border border-cyan-500/50 text-xs font-semibold flex items-center gap-2 backdrop-blur-md animate-fade-in pointer-events-auto">
+          <Crop className="w-4 h-4 text-cyan-400 animate-pulse" />
+          <span>✂️ Drag a box across any canvas area to capture screenshot (Esc to cancel)</span>
+          <button
+            onClick={() => setActiveTool('select')}
+            className="ml-2 text-slate-400 hover:text-white font-bold text-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Dynamic Custom Prompt Modal (Eliminates native alerts and prompts) */}
+      <PromptModal
+        isOpen={Boolean(promptConfig?.isOpen)}
+        title={promptConfig?.title}
+        message={promptConfig?.message}
+        initialValue={promptConfig?.initialValue}
+        onConfirm={promptConfig?.onConfirm}
+        onClose={promptConfig?.onClose}
       />
 
       {/* Bottom Status Pill */}

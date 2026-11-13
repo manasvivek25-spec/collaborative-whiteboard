@@ -21,6 +21,7 @@ import {
   Monitor,
   Download
 } from 'lucide-react';
+import PromptModal from './PromptModal';
 
 export default function Hub({
   user,
@@ -43,6 +44,7 @@ export default function Hub({
   const [copiedLanUrl, setCopiedLanUrl] = useState(false);
   const [copiedPublicUrl, setCopiedPublicUrl] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showPersonalBoardPrompt, setShowPersonalBoardPrompt] = useState(false);
   const [isStandaloneApp, setIsStandaloneApp] = useState(false);
   const [showAppModal, setShowAppModal] = useState(false);
   const [isScanningLan, setIsScanningLan] = useState(false);
@@ -137,12 +139,14 @@ export default function Hub({
   };
 
   const handleCreatePersonalBoard = () => {
-    const title = prompt('Enter Personal Board Name:', `My Workspace #${personalBoards.length + 1}`);
-    if (!title) return;
+    setShowPersonalBoardPrompt(true);
+  };
 
+  const handleConfirmCreatePersonalBoard = (title) => {
+    const finalTitle = (title || '').trim() || `My Workspace #${personalBoards.length + 1}`;
     const newBoard = {
       id: `pers_${Date.now()}`,
-      title: title.trim(),
+      title: finalTitle,
       created_at: new Date().toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
       actions: []
     };
@@ -232,7 +236,8 @@ export default function Hub({
             title: title.trim(),
             hostUserCode: user?.user_code || 'GUEST',
             hostName: user?.name || 'User',
-            isPublic: true
+            isPublic: true,
+            networkMode: mode
           })
         });
         if (res.ok) {
@@ -577,8 +582,7 @@ export default function Hub({
                 }).map(item => {
                   const validRooms = (item.rooms || []).filter(room => {
                     const isMyRoom = room.host_user_code === user?.user_code;
-                    const isInternetRoom = (room.title || '').toLowerCase().includes('internet') || room.network_mode === 'cloud';
-                    return !isMyRoom && !isInternetRoom;
+                    return !isMyRoom;
                   });
                   return { ...item, rooms: validRooms };
                 }).filter(item => item.rooms.length > 0);
@@ -1100,6 +1104,18 @@ export default function Hub({
           </div>
         </div>
       )}
+
+      {/* Personal Board Name Prompt Modal */}
+      <PromptModal
+        isOpen={showPersonalBoardPrompt}
+        title="Create Personal Workspace"
+        message="Enter a name for your private offline whiteboard:"
+        initialValue={`My Workspace #${personalBoards.length + 1}`}
+        placeholder="Workspace Name"
+        confirmText="Create Workspace"
+        onConfirm={handleConfirmCreatePersonalBoard}
+        onClose={() => setShowPersonalBoardPrompt(false)}
+      />
     </div>
   );
 }

@@ -9,7 +9,8 @@ import {
   Lock,
   Globe,
   FileBox,
-  Send
+  Send,
+  Crop
 } from 'lucide-react';
 
 export default function ExportModal({
@@ -23,6 +24,7 @@ export default function ExportModal({
   canSaveMilestone = true,
   canPublishPublicWork = true,
   onTakeScreenshot,
+  onStartAreaSnap,
   onPublishMilestone,
   onPublishPublicWork,
   onShareWithMember
@@ -135,6 +137,29 @@ export default function ExportModal({
         {/* Tab 1: Screenshot Options */}
         {activeTab === 'screenshot' && (
           <div className="space-y-4">
+            {/* Option A0: Snap Specific Area Screenshot */}
+            <div className="p-4 bg-cyan-50/80 rounded-xl border border-cyan-200 hover:border-cyan-400 transition flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-xs text-cyan-950 flex items-center gap-1.5">
+                  <Crop className="w-3.5 h-3.5 text-cyan-600" />
+                  Snap Specific Canvas Area
+                </h4>
+                <p className="text-[11px] text-cyan-700/90 mt-0.5">
+                  Drag a box across any canvas region to snip and save.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onStartAreaSnap) onStartAreaSnap();
+                  onClose();
+                }}
+                className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1 shrink-0"
+              >
+                <Crop className="w-3.5 h-3.5" />
+                Snap Area
+              </button>
+            </div>
             {/* Option A: Download PNG */}
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-blue-400 transition flex items-center justify-between">
               <div>

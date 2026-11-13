@@ -22,7 +22,8 @@ import {
   Hand,
   Lock,
   RotateCcw,
-  SquareDashedMousePointer
+  SquareDashedMousePointer,
+  Crop
 } from 'lucide-react';
 import { SHAPES_LIST } from './ShapesModal';
 
@@ -90,6 +91,15 @@ export default function Toolbar({
         className={`p-2 rounded-xl transition ${activeTool === 'pan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
       >
         <Hand className="w-4 h-4" />
+      </button>
+
+      {/* Snap Area Screenshot Tool */}
+      <button
+        onClick={() => setActiveTool('snap')}
+        title="Snap Area Screenshot (Crop): Drag any rectangular region to capture & save screenshot"
+        className={`p-2 rounded-xl transition ${activeTool === 'snap' ? 'bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-400' : 'text-slate-600 hover:bg-slate-100'}`}
+      >
+        <Crop className="w-4 h-4" />
       </button>
 
       {/* Primary Drawing Tools */}

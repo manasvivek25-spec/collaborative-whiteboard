@@ -264,7 +264,38 @@ export default function App() {
         } catch (err) {}
       }
 
-      // Layer 2: Cloud / Cross-Network Global Registry Lookup (for "With Internet" across any network)
+      // Layer 2: Fast Local Network Scan (If on same Wi-Fi or Hotspot, connects immediately in sub-second)
+      if (!roomFound && cleanCode && !extractedHost && !customHost) {
+        try {
+          const scanRes = await fetch('/api/lan/scan');
+          if (scanRes.ok) {
+            const scanData = await scanRes.json();
+            if (scanData.discovered && scanData.discovered.length > 0) {
+              for (const hostItem of scanData.discovered) {
+                if (hostItem.rooms && hostItem.rooms.some(r => r.code === cleanCode)) {
+                  const targetUrl = hostItem.url.replace(/\/$/, '');
+                  try {
+                    const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
+                      headers: { 'Bypass-Tunnel-Reminder': 'true' }
+                    });
+                    if (remoteRes.ok) {
+                      const remoteData = await remoteRes.json();
+                      if (remoteData.room) {
+                        roomFound = remoteData.room;
+                        setCustomServerHost(targetUrl);
+                        localStorage.setItem('whiteboard_custom_server', targetUrl);
+                        break;
+                      }
+                    }
+                  } catch (e) {}
+                }
+              }
+            }
+          }
+        } catch (scanErr) {}
+      }
+
+      // Layer 3: Cloud / Cross-Network Global Registry Lookup (for "With Internet" across any network)
       if (!roomFound && cleanCode && !extractedHost && !customHost) {
         try {
           const resolveRes = await fetch(`/api/rooms/resolve/${cleanCode}`);
@@ -291,19 +322,42 @@ export default function App() {
                 try {
                   const item = JSON.parse(lines[i]);
                   const payload = typeof item.message === 'string' ? JSON.parse(item.message) : item.message;
-                  if (payload && payload.url) {
-                    const targetUrl = payload.url.replace(/\/$/, '');
-                    const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
-                      headers: { 'Bypass-Tunnel-Reminder': 'true' }
-                    });
-                    if (remoteRes.ok) {
-                      const remoteData = await remoteRes.json();
-                      if (remoteData.room) {
-                        roomFound = remoteData.room;
-                        setCustomServerHost(targetUrl);
-                        localStorage.setItem('whiteboard_custom_server', targetUrl);
-                        break;
-                      }
+                  if (payload && payload.room && payload.room.toUpperCase() === cleanCode) {
+                    const candidateUrls = [];
+                    if (payload.url) candidateUrls.push(payload.url.replace(/\/$/, ''));
+                    if (Array.isArray(payload.lan_urls)) {
+                      payload.lan_urls.forEach(u => candidateUrls.push(u.replace(/\/$/, '')));
+                    }
+
+                    for (const targetUrl of candidateUrls) {
+                      try {
+                        const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
+                          headers: { 'Bypass-Tunnel-Reminder': 'true' }
+                        });
+                        if (remoteRes.ok) {
+                          const remoteData = await remoteRes.json();
+                          if (remoteData.room) {
+                            roomFound = remoteData.room;
+                            setCustomServerHost(targetUrl);
+                            localStorage.setItem('whiteboard_custom_server', targetUrl);
+                            break;
+                          }
+                        }
+                      } catch (pe) {}
+                    }
+                    if (roomFound) break;
+
+                    // Fallback to room info from payload if endpoint response is delayed
+                    if (payload.url || (payload.lan_urls && payload.lan_urls[0])) {
+                      const fallbackUrl = payload.url || payload.lan_urls[0];
+                      roomFound = {
+                        code: payload.room.toUpperCase(),
+                        title: payload.title || 'Collaborative Whiteboard',
+                        host_name: payload.host || 'Host'
+                      };
+                      setCustomServerHost(fallbackUrl);
+                      localStorage.setItem('whiteboard_custom_server', fallbackUrl);
+                      break;
                     }
                   }
                 } catch (pe) {}
@@ -311,35 +365,6 @@ export default function App() {
             }
           } catch (ne) {}
         }
-      }
-
-      // Layer 3: UDP LAN Discovery (for "Without Internet" / Same Wi-Fi or Hotspot)
-      if (!roomFound && cleanCode && !extractedHost && !customHost) {
-        try {
-          const scanRes = await fetch('/api/lan/scan');
-          if (scanRes.ok) {
-            const scanData = await scanRes.json();
-            if (scanData.discovered && scanData.discovered.length > 0) {
-              for (const hostItem of scanData.discovered) {
-                if (hostItem.rooms && hostItem.rooms.some(r => r.code === cleanCode)) {
-                  const targetUrl = hostItem.url.replace(/\/$/, '');
-                  const remoteRes = await fetch(`${targetUrl}/api/rooms/${cleanCode}`, {
-                    headers: { 'Bypass-Tunnel-Reminder': 'true' }
-                  });
-                  if (remoteRes.ok) {
-                    const remoteData = await remoteRes.json();
-                    if (remoteData.room) {
-                      roomFound = remoteData.room;
-                      setCustomServerHost(targetUrl);
-                      localStorage.setItem('whiteboard_custom_server', targetUrl);
-                      break;
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (scanErr) {}
       }
 
       // Layer 4: Rapid Subnet HTTP Probe (Fallback for Wi-Fi routers blocking UDP broadcast)

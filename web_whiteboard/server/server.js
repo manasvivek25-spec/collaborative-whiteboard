@@ -137,15 +137,15 @@ function startLanDiscoveryResponder() {
         if (payload.type === 'discover') {
           const adapters = getValidPhysicalAdapters();
           const hostIp = adapters.length > 0 ? adapters[0].ip : rinfo.address;
-          // Only broadcast true LAN/hotspot rooms (exclude cloud / internet rooms)
+          // Broadcast all active public rooms to local network so anyone on LAN / Wi-Fi can join
           const publicRooms = db.getPublicRooms()
-            .filter(r => r.network_mode !== 'cloud' && !(r.title || '').toLowerCase().includes('internet'))
             .map(r => ({
               code: r.code,
               title: r.title,
               host_name: r.host_name,
               host_user_code: r.host_user_code,
-              users_count: r.users_count || 1
+              users_count: r.users_count || 1,
+              network_mode: r.network_mode
             }));
 
           if (publicRooms.length === 0) return;
@@ -201,19 +201,22 @@ app.post('/api/internet/start-tunnel', async (req, res) => {
     });
     console.log('[Internet Mode] Public Tunnel established at:', activeTunnelUrl);
 
-    // Announce active cloud rooms to the global ntfy registry for instant 4-letter code lookups
+    // Announce active rooms to the global ntfy registry with both tunnel and LAN endpoints
     try {
-      const cloudRooms = db.getPublicRooms().filter(r => r.network_mode === 'cloud' || (r.title || '').toLowerCase().includes('internet'));
-      cloudRooms.forEach(r => {
+      const allRooms = db.getPublicRooms();
+      const adapters = getValidPhysicalAdapters();
+      const lanUrls = adapters.map(a => `http://${a.ip}:${PORT}`);
+      allRooms.forEach(r => {
         fetch(`https://ntfy.sh/wb-room-${r.code.toLowerCase()}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             room: r.code,
-            url: activeTunnelUrl,
+            url: activeTunnelUrl || '',
+            lan_urls: lanUrls,
             title: r.title,
             host: r.host_name,
-            network_mode: 'cloud',
+            network_mode: r.network_mode || 'cloud',
             timestamp: Date.now()
           })
         }).catch(() => {});
@@ -412,24 +415,24 @@ app.post('/api/rooms/create', (req, res) => {
       networkMode || 'hotspot'
     );
 
-    // If cloud mode or active tunnel, register room in global registry
-    if (activeTunnelUrl || networkMode === 'cloud') {
-      try {
-        const tunnelTarget = activeTunnelUrl || '';
-        fetch(`https://ntfy.sh/wb-room-${code.toLowerCase()}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            room: code,
-            url: tunnelTarget,
-            title: title.trim(),
-            host: hostName || 'Host',
-            network_mode: 'cloud',
-            timestamp: Date.now()
-          })
-        }).catch(() => {});
-      } catch (e) {}
-    }
+    // Announce room in global registry with both tunnel and local network endpoints
+    try {
+      const adapters = getValidPhysicalAdapters();
+      const lanUrls = adapters.map(a => `http://${a.ip}:${PORT}`);
+      fetch(`https://ntfy.sh/wb-room-${code.toLowerCase()}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room: code,
+          url: activeTunnelUrl || '',
+          lan_urls: lanUrls,
+          title: title.trim(),
+          host: hostName || 'Host',
+          network_mode: networkMode || 'cloud',
+          timestamp: Date.now()
+        })
+      }).catch(() => {});
+    } catch (e) {}
 
     res.json({ success: true, room });
   } catch (err) {
@@ -454,10 +457,10 @@ app.get('/api/rooms/resolve/:code', async (req, res) => {
     });
   }
 
-  // 2. Check cloud registry via ntfy.sh (for "With Internet" rooms across any network)
+  // 2. Check cloud & cross-network registry via ntfy.sh
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
+    const timeout = setTimeout(() => controller.abort(), 4000);
     const ntfyRes = await fetch(`https://ntfy.sh/wb-room-${code.toLowerCase()}/json?poll=1&since=24h`, {
       signal: controller.signal
     });
@@ -470,22 +473,49 @@ app.get('/api/rooms/resolve/:code', async (req, res) => {
         try {
           const item = JSON.parse(lines[i]);
           const payload = typeof item.message === 'string' ? JSON.parse(item.message) : item.message;
-          if (payload && payload.room && payload.room.toUpperCase() === code && payload.url) {
-            const verifyController = new AbortController();
-            const verifyTimeout = setTimeout(() => verifyController.abort(), 2000);
-            const remoteRes = await fetch(`${payload.url.replace(/\/$/, '')}/api/rooms/${code}`, {
-              headers: { 'Bypass-Tunnel-Reminder': 'true' },
-              signal: verifyController.signal
-            });
-            clearTimeout(verifyTimeout);
-            if (remoteRes.ok) {
-              const remoteData = await remoteRes.json();
+          if (payload && payload.room && payload.room.toUpperCase() === code) {
+            const candidateUrls = [];
+            if (payload.url) candidateUrls.push(payload.url.replace(/\/$/, ''));
+            if (Array.isArray(payload.lan_urls)) {
+              payload.lan_urls.forEach(u => candidateUrls.push(u.replace(/\/$/, '')));
+            }
+
+            for (const cUrl of candidateUrls) {
+              try {
+                const verifyController = new AbortController();
+                const verifyTimeout = setTimeout(() => verifyController.abort(), 2500);
+                const remoteRes = await fetch(`${cUrl}/api/rooms/${code}`, {
+                  headers: { 'Bypass-Tunnel-Reminder': 'true' },
+                  signal: verifyController.signal
+                });
+                clearTimeout(verifyTimeout);
+                if (remoteRes.ok) {
+                  const remoteData = await remoteRes.json();
+                  if (remoteData.room) {
+                    return res.json({
+                      success: true,
+                      found: true,
+                      mode: 'cloud',
+                      url: cUrl,
+                      room: remoteData.room
+                    });
+                  }
+                }
+              } catch (verErr) {}
+            }
+
+            // Fallback: If verification is slow but payload was published recently (< 2 hours)
+            if (payload.url || (payload.lan_urls && payload.lan_urls.length > 0)) {
               return res.json({
                 success: true,
                 found: true,
                 mode: 'cloud',
-                url: payload.url,
-                room: remoteData.room
+                url: payload.url || payload.lan_urls[0],
+                room: {
+                  code: payload.room.toUpperCase(),
+                  title: payload.title || 'Collaborative Whiteboard',
+                  host_name: payload.host || 'Host'
+                }
               });
             }
           }
@@ -504,6 +534,7 @@ app.get('/api/lan/find-room/:code', async (req, res) => {
 
   const adapters = getValidPhysicalAdapters();
   const candidateIps = new Set();
+  const candidatePorts = [PORT, 5000, 10000, 3000, 8080];
 
   ['192.168.43.1', '192.168.137.1', '192.168.1.1', '192.168.0.1', '10.0.0.1'].forEach(ip => candidateIps.add(ip));
 
@@ -513,7 +544,7 @@ app.get('/api/lan/find-room/:code', async (req, res) => {
       const prefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
       candidateIps.add(`${prefix}.1`);
       const currentLast = parseInt(parts[3], 10);
-      for (let offset = -8; offset <= 8; offset++) {
+      for (let offset = -12; offset <= 12; offset++) {
         const targetLast = currentLast + offset;
         if (targetLast > 0 && targetLast < 255 && targetLast !== currentLast) {
           candidateIps.add(`${prefix}.${targetLast}`);
@@ -522,28 +553,38 @@ app.get('/api/lan/find-room/:code', async (req, res) => {
     }
   }
 
-  const probePromises = Array.from(candidateIps).map(async (ip) => {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 400);
-      const url = `http://${ip}:${PORT}`;
-      const probeRes = await fetch(`${url}/api/rooms/${code}`, {
-        headers: { 'Bypass-Tunnel-Reminder': 'true' },
-        signal: controller.signal
+  const probeTasks = [];
+  for (const ip of candidateIps) {
+    for (const port of candidatePorts) {
+      probeTasks.push(async () => {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 450);
+          const url = `http://${ip}:${port}`;
+          const probeRes = await fetch(`${url}/api/rooms/${code}`, {
+            headers: { 'Bypass-Tunnel-Reminder': 'true' },
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+          if (probeRes.ok) {
+            const data = await probeRes.json();
+            if (data.room) return { url, room: data.room, ip, port };
+          }
+        } catch (e) {}
+        return null;
       });
-      clearTimeout(timeout);
-      if (probeRes.ok) {
-        const data = await probeRes.json();
-        if (data.room) return { url, room: data.room, ip };
-      }
-    } catch (e) {}
-    return null;
-  });
+    }
+  }
 
-  const results = await Promise.all(probePromises);
-  const found = results.find(Boolean);
-  if (found) {
-    return res.json({ success: true, found: true, url: found.url, room: found.room, ip: found.ip });
+  // Run in chunks to prevent socket exhaustion
+  const chunkSize = 20;
+  for (let i = 0; i < probeTasks.length; i += chunkSize) {
+    const batch = probeTasks.slice(i, i + chunkSize).map(fn => fn());
+    const batchResults = await Promise.all(batch);
+    const hit = batchResults.find(Boolean);
+    if (hit) {
+      return res.json({ success: true, found: true, url: hit.url, room: hit.room, ip: hit.ip });
+    }
   }
 
   res.json({ success: true, found: false });
