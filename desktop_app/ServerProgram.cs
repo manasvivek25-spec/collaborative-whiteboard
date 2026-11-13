@@ -75,7 +75,7 @@ namespace CollaborativeWhiteboard
                     ProcessStartInfo psi = new ProcessStartInfo
                     {
                         FileName = hasBundledNode ? bundledNode : "node.exe",
-                        Arguments = "server.js",
+                        Arguments = string.Format("\"{0}\"", serverScript),
                         WorkingDirectory = serverDir,
                         WindowStyle = ProcessWindowStyle.Hidden,
                         CreateNoWindow = true,

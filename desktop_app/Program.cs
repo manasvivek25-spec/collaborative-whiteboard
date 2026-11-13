@@ -2,7 +2,10 @@ using System;
 using System.IO;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Sockets;
+using System.Net.NetworkInformation;
 using System.Threading;
+using System.Drawing;
 using System.Windows.Forms;
 
 namespace CollaborativeWhiteboard
@@ -10,6 +13,7 @@ namespace CollaborativeWhiteboard
     static class Program
     {
         private static Process serverProcess = null;
+        private static string appDir = AppDomain.CurrentDomain.BaseDirectory;
 
         [STAThread]
         static void Main(string[] args)
@@ -17,9 +21,21 @@ namespace CollaborativeWhiteboard
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            string appDir = AppDomain.CurrentDomain.BaseDirectory;
+            // If a custom remote host is passed via command-line (e.g., Collaborative_Whiteboard.exe 192.168.1.5:5000)
+            if (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
+            {
+                string targetHost = args[0].Trim();
+                if (!targetHost.StartsWith("http://") && !targetHost.StartsWith("https://"))
+                {
+                    targetHost = "http://" + targetHost;
+                }
+                LaunchAppWindow(targetHost);
+                return;
+            }
+
             string bundledNode = Path.Combine(appDir, @"runtime\node.exe");
             bool hasBundledNode = File.Exists(bundledNode);
+
             string serverScript = Path.Combine(appDir, @"web_whiteboard\server\server.js");
             string serverModules = Path.Combine(appDir, @"web_whiteboard\server\node_modules");
             string distIndex = Path.Combine(appDir, @"web_whiteboard\client\dist\index.html");
@@ -35,19 +51,6 @@ namespace CollaborativeWhiteboard
                 }
             }
 
-            // If a custom remote host is passed via command-line (e.g., Collaborative_Whiteboard.exe 10.36.112.55:5000)
-            if (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
-            {
-                string targetHost = args[0].Trim();
-                if (!targetHost.StartsWith("http://") && !targetHost.StartsWith("https://"))
-                {
-                    targetHost = "http://" + targetHost;
-                }
-                LaunchAppWindow(targetHost);
-                return;
-            }
-
-            // Check if server.js exists
             if (!File.Exists(serverScript))
             {
                 MessageBox.Show(
@@ -60,85 +63,40 @@ namespace CollaborativeWhiteboard
                 return;
             }
 
-            // Check if Node.js is available (bundled runtime or system node)
-            if (!hasBundledNode && !IsNodeInstalled())
-            {
-                DialogResult dr = MessageBox.Show(
-                    "Node.js runtime was not found on this computer.\n\n" +
-                    "• To HOST sessions: Please install Node.js from https://nodejs.org\n" +
-                    "• To JOIN a partner's session: Connect to their LAN IP instead of localhost.\n\n" +
-                    "Would you like to enter a friend's Host IP address to join their whiteboard now?",
-                    "Collaborative Whiteboard",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Question
-                );
-
-                if (dr == DialogResult.Yes)
-                {
-                    PromptAndJoinRemote();
-                }
-                return;
-            }
-
-            // Check if server dependencies exist
-            if (!Directory.Exists(serverModules))
-            {
-                DialogResult dr = MessageBox.Show(
-                    "Server dependencies are not installed yet.\n\n" +
-                    "Would you like to run 'install_dependencies.bat' now to install required packages?",
-                    "Collaborative Whiteboard - Setup Required",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Information
-                );
-
-                if (dr == DialogResult.Yes)
-                {
-                    string setupScript = Path.Combine(appDir, "install_dependencies.bat");
-                    if (File.Exists(setupScript))
-                    {
-                        Process.Start(new ProcessStartInfo
-                        {
-                            FileName = setupScript,
-                            WorkingDirectory = appDir
-                        });
-                    }
-                }
-                return;
-            }
-
-            // Check if client dist exists; if not, build it silently
-            if (!File.Exists(distIndex))
-            {
-                try
-                {
-                    ProcessStartInfo buildPsi = new ProcessStartInfo
-                    {
-                        FileName = "cmd.exe",
-                        Arguments = "/c npm run build",
-                        WorkingDirectory = Path.Combine(appDir, @"web_whiteboard\client"),
-                        WindowStyle = ProcessWindowStyle.Hidden,
-                        CreateNoWindow = true,
-                        UseShellExecute = false
-                    };
-                    Process buildProc = Process.Start(buildPsi);
-                    if (buildProc != null) buildProc.WaitForExit(30000);
-                }
-                catch { }
-            }
-
             // Check if server is already running on port 5000
             bool alreadyRunning = IsServerResponding("http://127.0.0.1:5000/api/network-info");
 
             if (!alreadyRunning)
             {
-                // Start Node.js server silently using bundled node runtime if available
+                // Verify Node runtime
+                if (!hasBundledNode && !IsNodeInstalled())
+                {
+                    DialogResult dr = MessageBox.Show(
+                        "Node.js runtime was not found on this computer.\n\n" +
+                        "• To HOST sessions: Please install Node.js from https://nodejs.org or place node.exe in the 'runtime' folder.\n" +
+                        "• To JOIN a partner's session: Connect to their LAN IP instead of localhost.\n\n" +
+                        "Would you like to enter a friend's Host IP address to join their whiteboard now?",
+                        "Collaborative Whiteboard",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+
+                    if (dr == DialogResult.Yes)
+                    {
+                        PromptAndJoinRemote();
+                    }
+                    return;
+                }
+
+                // Start Node.js server in the background
                 try
                 {
+                    string serverDir = Path.GetDirectoryName(serverScript);
                     ProcessStartInfo serverPsi = new ProcessStartInfo
                     {
-                        FileName = hasBundledNode ? bundledNode : "cmd.exe",
-                        Arguments = hasBundledNode ? "server.js" : "/c node server.js",
-                        WorkingDirectory = Path.Combine(appDir, @"web_whiteboard\server"),
+                        FileName = hasBundledNode ? bundledNode : "node.exe",
+                        Arguments = string.Format("\"{0}\"", serverScript),
+                        WorkingDirectory = serverDir,
                         WindowStyle = ProcessWindowStyle.Hidden,
                         CreateNoWindow = true,
                         UseShellExecute = false
@@ -159,13 +117,12 @@ namespace CollaborativeWhiteboard
                     attempts++;
                 }
 
-                // If server still failed to respond
                 if (!IsServerResponding("http://127.0.0.1:5000/api/network-info"))
                 {
                     DialogResult dr = MessageBox.Show(
                         "The local server on port 5000 did not respond.\n\n" +
-                        "• If you are HOSTING: Please verify port 5000 is free and run 'install_dependencies.bat'.\n" +
-                        "• If you are JOINING a friend's whiteboard: Do not connect to localhost! You must connect to your friend's LAN IP address.\n\n" +
+                        "• If you are HOSTING: Please verify port 5000 is free.\n" +
+                        "• If you are JOINING a friend's whiteboard: Connect to their LAN IP address.\n\n" +
                         "Would you like to enter a friend's Host IP address to join?",
                         "Collaborative Whiteboard - Connection Notice",
                         MessageBoxButtons.YesNo,
@@ -181,14 +138,147 @@ namespace CollaborativeWhiteboard
                 }
             }
 
-            // Set up exit cleanup hook
+            // Cleanup on process exit
             AppDomain.CurrentDomain.ProcessExit += (s, e) => CleanUp();
 
-            // Launch desktop application window
+            // Detect LAN IP
+            string localIp = GetPrimaryLanIp();
+            string lanUrl = !string.IsNullOrEmpty(localIp) ? "http://" + localIp + ":5000" : "http://localhost:5000";
+
+            // Automatically launch app window
             LaunchAppWindow("http://localhost:5000");
 
-            // Clean up when app window exits
-            CleanUp();
+            // Show persistent host management window so server stays alive and user can copy LAN link
+            Form hostForm = new Form()
+            {
+                Text = "Collaborative Whiteboard - Active Session Host",
+                Width = 540,
+                Height = 310,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                StartPosition = FormStartPosition.CenterScreen,
+                MaximizeBox = false,
+                BackColor = Color.FromArgb(248, 250, 252)
+            };
+
+            // Custom icon if available
+            string iconPath = Path.Combine(appDir, "app.ico");
+            if (File.Exists(iconPath))
+            {
+                try { hostForm.Icon = new Icon(iconPath); } catch { }
+            }
+
+            Label lblStatus = new Label()
+            {
+                Text = "● Whiteboard Server is Online & Running",
+                Font = new Font("Segoe UI", 11, FontStyle.Bold),
+                ForeColor = Color.FromArgb(22, 101, 52),
+                Left = 25,
+                Top = 20,
+                Width = 470,
+                Height = 25
+            };
+
+            Label lblDesc = new Label()
+            {
+                Text = "Your whiteboard session is active. Friends on the same Wi-Fi / LAN can join using your LAN IP below.",
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.FromArgb(71, 85, 105),
+                Left = 25,
+                Top = 48,
+                Width = 470,
+                Height = 35
+            };
+
+            GroupBox grpIp = new GroupBox()
+            {
+                Text = "Network Join Information",
+                Font = new Font("Segoe UI", 9),
+                ForeColor = Color.FromArgb(30, 41, 59),
+                Left = 25,
+                Top = 90,
+                Width = 475,
+                Height = 85
+            };
+
+            TextBox txtLan = new TextBox()
+            {
+                Text = lanUrl,
+                ReadOnly = true,
+                Font = new Font("Segoe UI", 10, FontStyle.Bold),
+                Left = 15,
+                Top = 30,
+                Width = 320,
+                Height = 28
+            };
+
+            Button btnCopy = new Button()
+            {
+                Text = "Copy LAN Link",
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Left = 345,
+                Top = 28,
+                Width = 115,
+                Height = 32,
+                BackColor = Color.FromArgb(241, 245, 249),
+                ForeColor = Color.FromArgb(30, 41, 59),
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnCopy.FlatAppearance.BorderColor = Color.FromArgb(203, 213, 225);
+            btnCopy.Click += (s, e) =>
+            {
+                try
+                {
+                    Clipboard.SetText(txtLan.Text);
+                    MessageBox.Show("LAN join link copied to clipboard:\n" + txtLan.Text, "Copied!", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch { }
+            };
+
+            grpIp.Controls.Add(txtLan);
+            grpIp.Controls.Add(btnCopy);
+
+            Button btnOpen = new Button()
+            {
+                Text = "Re-Open Whiteboard Window",
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Left = 25,
+                Top = 195,
+                Width = 240,
+                Height = 42,
+                BackColor = Color.FromArgb(37, 99, 235),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnOpen.FlatAppearance.BorderSize = 0;
+            btnOpen.Click += (s, e) => LaunchAppWindow("http://localhost:5000");
+
+            Button btnStop = new Button()
+            {
+                Text = "Stop Server & Exit",
+                Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Left = 280,
+                Top = 195,
+                Width = 220,
+                Height = 42,
+                BackColor = Color.FromArgb(239, 68, 68),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Cursor = Cursors.Hand
+            };
+            btnStop.FlatAppearance.BorderSize = 0;
+            btnStop.Click += (s, e) => hostForm.Close();
+
+            hostForm.Controls.Add(lblStatus);
+            hostForm.Controls.Add(lblDesc);
+            hostForm.Controls.Add(grpIp);
+            hostForm.Controls.Add(btnOpen);
+            hostForm.Controls.Add(btnStop);
+
+            hostForm.FormClosing += (s, e) => CleanUp();
+
+            Application.Run(hostForm);
         }
 
         private static void PromptAndJoinRemote()
@@ -302,13 +392,7 @@ namespace CollaborativeWhiteboard
                 };
                 try
                 {
-                    using (Process appWindow = Process.Start(psi))
-                    {
-                        if (appWindow != null)
-                        {
-                            appWindow.WaitForExit();
-                        }
-                    }
+                    Process.Start(psi);
                 }
                 catch
                 {
@@ -317,7 +401,6 @@ namespace CollaborativeWhiteboard
             }
             else
             {
-                // Fallback to default browser
                 Process.Start(url);
             }
         }
@@ -341,6 +424,32 @@ namespace CollaborativeWhiteboard
                 }
                 catch { }
             }
+        }
+
+        private static string GetPrimaryLanIp()
+        {
+            try
+            {
+                foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (ni.OperationalStatus != OperationalStatus.Up) continue;
+                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+
+                    string desc = (ni.Description + " " + ni.Name).ToLower();
+                    if (desc.Contains("virtual") || desc.Contains("vethernet") || desc.Contains("wsl") || desc.Contains("hyper-v"))
+                        continue;
+
+                    foreach (UnicastIPAddressInformation ip in ni.GetIPProperties().UnicastAddresses)
+                    {
+                        if (ip.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip.Address))
+                        {
+                            return ip.Address.ToString();
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
     }
 }
