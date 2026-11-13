@@ -119,6 +119,10 @@ export default function Whiteboard({
   }); // null | { id, title, actions: [...], original_snapshot: [...], host_sandbox: [...] }
   const [sandboxViewMode, setSandboxViewMode] = useState('sandbox'); // 'original' | 'sandbox' | 'host_sandbox'
 
+  // Eraser Tool Real-Time Hover & Path State
+  const [eraserHoverPos, setEraserHoverPos] = useState(null); // null | { x, y }
+  const [lastEraserPoint, setLastEraserPoint] = useState(null); // null | { x, y }
+
   // Selection & Manipulation State
   const [selectedId, setSelectedId] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -910,6 +914,75 @@ export default function Whiteboard({
     return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   }
 
+  function isActionHitByEraser(act, x, y, radius, curZoom = 1) {
+    if (!act || act.undone) return false;
+    if (act.brush === 'eraser') return false;
+
+    const b = getActionBBox(act);
+    if (!b) return false;
+
+    const r = Math.max(10, radius);
+    if (x < b.x - r || x > b.x + b.w + r || y < b.y - r || y > b.y + b.h + r) {
+      return false;
+    }
+
+    if (act.kind === 'sticky' || act.kind === 'table' || act.kind === 'text') {
+      return (
+        x >= b.x - r &&
+        x <= b.x + b.w + r &&
+        y >= b.y - r &&
+        y <= b.y + b.h + r
+      );
+    }
+
+    if (act.kind === 'rect' || act.kind === 'rounded_rect') {
+      if (act.fill && act.fill !== 'transparent' && act.fill !== 'none') {
+        return x >= b.x - r && x <= b.x + b.w + r && y >= b.y - r && y <= b.y + b.h + r;
+      }
+      const nearLeft = Math.abs(x - b.x) <= r && y >= b.y - r && y <= b.y + b.h + r;
+      const nearRight = Math.abs(x - (b.x + b.w)) <= r && y >= b.y - r && y <= b.y + b.h + r;
+      const nearTop = Math.abs(y - b.y) <= r && x >= b.x - r && x <= b.x + b.w + r;
+      const nearBottom = Math.abs(y - (b.y + b.h)) <= r && x >= b.x - r && x <= b.x + b.w + r;
+      return nearLeft || nearRight || nearTop || nearBottom;
+    }
+
+    if (act.kind === 'circle') {
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const circleR = Math.min(b.w, b.h) / 2;
+      const d = Math.hypot(x - cx, y - cy);
+      if (act.fill && act.fill !== 'transparent' && act.fill !== 'none') {
+        return d <= circleR + r;
+      }
+      return Math.abs(d - circleR) <= r;
+    }
+
+    if (act.kind === 'line' || act.kind === 'arrow') {
+      const thresh = Math.max(r, (act.width || 4) / 2);
+      const distSq = pointToSegmentDistSq(x, y, act.x1, act.y1, act.x2, act.y2);
+      return distSq <= thresh * thresh;
+    }
+
+    if (act.kind === 'stroke') {
+      const pts = act.points;
+      if (!pts || pts.length < 1) return false;
+      const thresh = Math.max(r, (act.width || 4) / 2);
+      const threshSq = thresh * thresh;
+
+      if (pts.length === 1) {
+        return ((x - pts[0][0]) ** 2 + (y - pts[0][1]) ** 2) <= threshSq;
+      }
+
+      for (let i = 0; i < pts.length - 1; i++) {
+        const dSq = pointToSegmentDistSq(x, y, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+        if (dSq <= threshSq) return true;
+      }
+      return false;
+    }
+
+    return x >= b.x - r && x <= b.x + b.w + r && y >= b.y - r && y <= b.y + b.h + r;
+  }
+
   // ── REDRAW CANVAS ENGINE ───────────────────────────────────────────
   const redrawCanvas = useCallback(() => {
     // 1. Draw Background Grid
@@ -1116,29 +1189,36 @@ export default function Whiteboard({
       }
     }
 
+    // Render live circular eraser preview under cursor
+    if (activeTool === 'eraser' && eraserHoverPos) {
+      const radius = Math.max(14, strokeWidth * 2.5);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(eraserHoverPos.x, eraserHoverPos.y, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = isDrawing ? '#ef4444' : '#64748b';
+      ctx.lineWidth = 2 / zoom;
+      ctx.fillStyle = isDrawing ? 'rgba(239, 68, 68, 0.2)' : 'rgba(100, 116, 139, 0.1)';
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.restore();
-  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, fillShape, fillColor, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId, selectedIds, selectionBox, snapBox]);
+  }, [currentDisplayActions, streamingStrokes, currentStroke, currentPreviewPoint, shapeStart, activeShape, activeTool, strokeColor, strokeWidth, fillShape, fillColor, zoom, panOffset, drawInfiniteGrid, selectedTableId, selectedId, selectedIds, selectionBox, snapBox, eraserHoverPos, isDrawing]);
 
   useEffect(() => {
     redrawCanvas();
   }, [redrawCanvas]);
 
-  // Stroke renderer with support for Eraser using destination-out
+  // Stroke renderer
   function renderStroke(ctx, points, color, width, brush, opacity = 1) {
     if (!points || points.length < 1) return;
+    if (brush === 'eraser') return; // Completely ignore legacy eraser stroke masks
     ctx.save();
 
-    if (brush === 'eraser') {
-      // Eraser clears only drawn strokes, leaving the background grid layer untouched!
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.strokeStyle = 'rgba(0,0,0,1)';
-      ctx.lineWidth = width * 2;
-    } else {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = width;
-      ctx.globalAlpha = opacity;
-    }
-
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.globalAlpha = opacity;
     ctx.lineCap = brush === 'highlighter' ? 'square' : 'round';
     ctx.lineJoin = 'round';
 
@@ -1152,6 +1232,9 @@ export default function Whiteboard({
   }
 
   function renderAction(ctx, act) {
+    if (!act || act.undone) return;
+    if (act.brush === 'eraser') return; // Skip any legacy eraser stroke layers
+
     ctx.save();
     ctx.strokeStyle = act.color || '#000000';
     ctx.fillStyle = act.fill || 'transparent';
@@ -1462,6 +1545,29 @@ export default function Whiteboard({
     return screenToWorld(clientX, clientY);
   };
 
+  // ── ACTUAL REAL-TIME ELEMENT & STROKE ERASER ENGINE ────────────────
+  const eraseAtPoint = useCallback((x, y) => {
+    if (!myPermissions.can_draw && !viewingInstance) {
+      return;
+    }
+    const radius = Math.max(14, strokeWidth * 2.5);
+    const hitActs = [];
+    for (const act of currentDisplayActions) {
+      if (act.undone || act.brush === 'eraser') continue;
+      if (isActionHitByEraser(act, x, y, radius, zoom)) {
+        hitActs.push(act);
+      }
+    }
+    if (hitActs.length > 0) {
+      hitActs.forEach(act => {
+        if (selectedId === act.id) setSelectedId(null);
+        if (selectedTableId === act.id) setSelectedTableId(null);
+        commitAction({ ...act, undone: true });
+      });
+      setSelectedIds(prev => prev.filter(id => !hitActs.some(h => h.id === id)));
+    }
+  }, [currentDisplayActions, myPermissions.can_draw, viewingInstance, strokeWidth, zoom, selectedId, selectedTableId]);
+
   // ── MOUSE / POINTER EVENT HANDLERS ─────────────────────────────────
   const handlePointerDown = (e) => {
     const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
@@ -1491,6 +1597,15 @@ export default function Whiteboard({
     // ── SNAP AREA SCREENSHOT TOOL (Highest Priority) ─────────────────────
     if (activeTool === 'snap') {
       setSnapBox({ startX: x, startY: y, currentX: x, currentY: y });
+      return;
+    }
+
+    // ── ERASER TOOL (Real-Time Object & Stroke Eraser) ───────────────────
+    if (activeTool === 'eraser') {
+      setIsDrawing(true);
+      setLastEraserPoint({ x, y });
+      setEraserHoverPos({ x, y });
+      eraseAtPoint(x, y);
       return;
     }
 
@@ -1796,14 +1911,14 @@ export default function Whiteboard({
 
     setIsDrawing(true);
 
-    if (['pencil', 'brush', 'highlighter', 'eraser'].includes(activeTool)) {
+    if (['pencil', 'brush', 'highlighter'].includes(activeTool)) {
       const strokeId = `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const strokeObj = {
         id: strokeId,
         kind: 'stroke',
         points: [[x, y]],
-        color: activeTool === 'eraser' ? '#000000' : strokeColor,
-        width: activeTool === 'eraser' ? strokeWidth * 2.5 : strokeWidth,
+        color: strokeColor,
+        width: strokeWidth,
         brush: activeTool,
         opacity: activeTool === 'highlighter' ? 0.45 : 1
       };
@@ -1883,6 +1998,26 @@ export default function Whiteboard({
     // Broadcast cursor position to peers (throttled)
     if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'cursor', x, y }));
+    }
+
+    // Handle Eraser Tool Hover & Real-Time Object/Stroke Erasing
+    if (activeTool === 'eraser') {
+      setEraserHoverPos({ x, y });
+      if (isDrawing) {
+        if (lastEraserPoint) {
+          const dist = Math.hypot(x - lastEraserPoint.x, y - lastEraserPoint.y);
+          const steps = Math.max(1, Math.ceil(dist / 8));
+          for (let s = 1; s <= steps; s++) {
+            const ix = lastEraserPoint.x + (x - lastEraserPoint.x) * (s / steps);
+            const iy = lastEraserPoint.y + (y - lastEraserPoint.y) * (s / steps);
+            eraseAtPoint(ix, iy);
+          }
+        } else {
+          eraseAtPoint(x, y);
+        }
+        setLastEraserPoint({ x, y });
+      }
+      return;
     }
 
     // Handle Table Resizing
@@ -2116,6 +2251,12 @@ export default function Whiteboard({
   const handlePointerUp = (e) => {
     if (isPanning) {
       setIsPanning(false);
+      return;
+    }
+
+    if (activeTool === 'eraser') {
+      setIsDrawing(false);
+      setLastEraserPoint(null);
       return;
     }
 
@@ -3527,9 +3668,15 @@ export default function Whiteboard({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerLeave={() => {
+          setEraserHoverPos(null);
+          setLastEraserPoint(null);
+          if (activeTool === 'eraser') setIsDrawing(false);
+        }}
         className={`whiteboard-canvas absolute inset-0 z-[1] touch-none bg-transparent ${
           activeTool === 'pan' ? 'cursor-grab active:cursor-grabbing' :
           activeTool === 'select' ? 'cursor-default' :
+          activeTool === 'eraser' ? 'cursor-none' :
           !myPermissions.can_draw ? 'cursor-not-allowed' : 'cursor-crosshair'
         }`}
       />

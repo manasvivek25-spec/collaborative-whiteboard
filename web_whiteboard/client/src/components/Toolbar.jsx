@@ -153,7 +153,7 @@ export default function Toolbar({
         <button
           disabled={!canDraw}
           onClick={() => setActiveTool('eraser')}
-          title="Eraser (Erases ink without touching grid)"
+          title="Eraser (Cleanly erases strokes, shapes & items)"
           className={`p-2 rounded-xl transition ${
             !canDraw ? 'opacity-40 cursor-not-allowed text-slate-400' :
             activeTool === 'eraser' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
