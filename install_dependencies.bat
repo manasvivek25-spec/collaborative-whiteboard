@@ -51,14 +51,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: 4. Compile Desktop Application Executable
+:: 4. Compile Standalone Executables (Server, Client, and All-in-One)
 cd /d "%~dp0"
 echo.
-echo [*] Compiling Native Windows Desktop Executable (Collaborative_Whiteboard.exe)...
+echo [*] Compiling Standalone Deliverable Executables via Microsoft .NET...
 if exist "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" (
-    "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /win32icon:app.ico /out:Collaborative_Whiteboard.exe desktop_app\Program.cs
-    if exist "Collaborative_Whiteboard.exe" (
-        echo [SUCCESS] Collaborative_Whiteboard.exe compiled successfully!
+    "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:exe /win32icon:app.ico /out:Server_Application.exe desktop_app\ServerProgram.cs
+    "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /win32icon:app.ico /r:System.Windows.Forms.dll,System.Drawing.dll /out:Client_Application.exe desktop_app\ClientProgram.cs
+    "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /win32icon:app.ico /r:System.Windows.Forms.dll,System.Drawing.dll /out:Collaborative_Whiteboard.exe desktop_app\Program.cs
+    if exist "Server_Application.exe" (
+        echo [SUCCESS] Server_Application.exe, Client_Application.exe, and Collaborative_Whiteboard.exe compiled successfully!
     )
 ) else (
     echo [INFO] csc.exe not found. Desktop app will run via Collaborative_Whiteboard.bat / Collaborative_Whiteboard.vbs.
