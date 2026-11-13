@@ -492,6 +492,38 @@ export function getNextSeq(roomCode) {
   return stmt.get(roomCode.trim().toUpperCase()).next_seq;
 }
 
+export function replaceRoomActions(roomCode, actions) {
+  const cleanRoom = roomCode.trim().toUpperCase();
+  const deleteStmt = db.prepare('DELETE FROM actions WHERE UPPER(room_code) = ?');
+  const insertStmt = db.prepare(`
+    INSERT INTO actions (id, room_code, user_code, user_name, kind, data_json, seq, undone)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const runReplace = db.transaction((acts) => {
+    deleteStmt.run(cleanRoom);
+    let seq = 1;
+    for (const a of acts) {
+      if (!a) continue;
+      insertStmt.run(
+        a.id || `act_${Date.now()}_${seq}_${Math.random().toString(36).substring(2, 6)}`,
+        cleanRoom,
+        a.user_code || null,
+        a.user || a.user_name || 'User',
+        a.kind || 'stroke',
+        JSON.stringify(a),
+        seq++,
+        a.undone ? 1 : 0
+      );
+    }
+    // Update room activity
+    db.prepare("UPDATE rooms SET updated_at = datetime('now', 'localtime') WHERE UPPER(code) = ?").run(cleanRoom);
+  });
+
+  const actsList = Array.isArray(actions) ? actions : [];
+  runReplace(actsList);
+}
+
 /**
  * Chat Messages
  */
@@ -537,7 +569,8 @@ export function clearRoomChat(roomCode) {
  */
 export function saveMilestone(roomCode, milestone) {
   const cleanRoom = roomCode.trim().toUpperCase();
-  const snapshotJson = JSON.stringify(milestone.snapshot || milestone.actions || []);
+  const rawSnap = milestone.snapshot || milestone.actions || [];
+  const snapshotJson = typeof rawSnap === 'string' ? rawSnap : JSON.stringify(rawSnap);
   const stmt = db.prepare(`
     INSERT INTO milestones (id, room_code, title, author_code, author_name, snapshot_json, original_snapshot_json, host_sandbox_json, is_public, timestamp)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -554,8 +587,8 @@ export function saveMilestone(roomCode, milestone) {
     milestone.author_code || '',
     milestone.author_name || milestone.author || 'User',
     snapshotJson,
-    milestone.original_snapshot_json ? JSON.stringify(milestone.original_snapshot_json) : snapshotJson,
-    milestone.host_sandbox_json ? JSON.stringify(milestone.host_sandbox_json) : snapshotJson,
+    milestone.original_snapshot_json ? (typeof milestone.original_snapshot_json === 'string' ? milestone.original_snapshot_json : JSON.stringify(milestone.original_snapshot_json)) : snapshotJson,
+    milestone.host_sandbox_json ? (typeof milestone.host_sandbox_json === 'string' ? milestone.host_sandbox_json : JSON.stringify(milestone.host_sandbox_json)) : snapshotJson,
     milestone.is_public !== undefined ? (milestone.is_public ? 1 : 0) : 1,
     milestone.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   );
@@ -577,9 +610,25 @@ export function getRoomMilestones(roomCode, viewerUserCode = null) {
     }
     return false;
   }).map(m => {
-    const snap = JSON.parse(m.snapshot_json || '[]');
-    const orig = m.original_snapshot_json ? JSON.parse(m.original_snapshot_json) : snap;
-    const hostSand = m.host_sandbox_json ? JSON.parse(m.host_sandbox_json) : snap;
+    let snap = [];
+    try { snap = JSON.parse(m.snapshot_json || '[]'); } catch(e){}
+    if (typeof snap === 'string') { try { snap = JSON.parse(snap); } catch(e){} }
+    if (!Array.isArray(snap)) snap = [];
+
+    let orig = snap;
+    if (m.original_snapshot_json) {
+      try { orig = JSON.parse(m.original_snapshot_json); } catch(e){}
+      if (typeof orig === 'string') { try { orig = JSON.parse(orig); } catch(e){} }
+      if (!Array.isArray(orig)) orig = snap;
+    }
+
+    let hostSand = snap;
+    if (m.host_sandbox_json) {
+      try { hostSand = JSON.parse(m.host_sandbox_json); } catch(e){}
+      if (typeof hostSand === 'string') { try { hostSand = JSON.parse(hostSand); } catch(e){} }
+      if (!Array.isArray(hostSand)) hostSand = snap;
+    }
+
     return {
       id: m.id,
       title: m.title,
@@ -601,12 +650,13 @@ export function deleteMilestone(milestoneId) {
 }
 
 export function updateMilestoneSnapshot(milestoneId, snapshot) {
+  const snapJson = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot || []);
   const stmt = db.prepare('UPDATE milestones SET snapshot_json = ? WHERE id = ?');
-  stmt.run(JSON.stringify(snapshot || []), milestoneId);
+  stmt.run(snapJson, milestoneId);
 }
 
 export function updateMilestoneHostSandbox(milestoneId, sandboxActions) {
-  const snapJson = JSON.stringify(sandboxActions || []);
+  const snapJson = typeof sandboxActions === 'string' ? sandboxActions : JSON.stringify(sandboxActions || []);
   const stmt = db.prepare('UPDATE milestones SET host_sandbox_json = ?, snapshot_json = ? WHERE id = ?');
   stmt.run(snapJson, snapJson, milestoneId);
 }
@@ -760,6 +810,7 @@ export default {
   saveAction,
   updateActionUndone,
   getRoomActions,
+  replaceRoomActions,
   getNextSeq,
   saveChatMessage,
   getChatHistory,

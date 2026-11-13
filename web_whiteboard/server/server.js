@@ -1113,28 +1113,31 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 11. Restore Canvas Milestone (Strictly HOST only)
+    // 11. Restore Canvas Milestone (Strictly HOST or Cohost)
     case 'restore_milestone': {
       if (!meta.room_code) return;
-      const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+      const { isHost, perms } = getMemberPermissions(meta.room_code, meta.user_code);
 
-      if (!isHost) {
+      if (!isHost && perms.role !== 'cohost') {
         return ws.send(JSON.stringify({
           type: 'error',
           text: 'Restricted: Only the host has permission to restore canvas instances to the live whiteboard.'
         }));
       }
 
-      const actions = msg.actions || [];
-      for (const a of actions) {
-        a.seq = db.getNextSeq(meta.room_code);
-        db.saveAction(meta.room_code, a);
+      let actionsToRestore = msg.actions || msg.snapshot || [];
+      if (typeof actionsToRestore === 'string') {
+        try { actionsToRestore = JSON.parse(actionsToRestore); } catch(e) { actionsToRestore = []; }
       }
+      if (!Array.isArray(actionsToRestore)) actionsToRestore = [];
+
+      // Atomically replace all room actions with the restored milestone snapshot
+      db.replaceRoomActions(meta.room_code, actionsToRestore);
+      const updatedActions = db.getRoomActions(meta.room_code);
 
       broadcastToRoom(meta.room_code, {
         type: 'snapshot_restored',
-        actions: db.getRoomActions(meta.room_code),
+        actions: updatedActions,
         title: msg.title || 'Restored Milestone',
         restored_by: meta.user_name
       });
@@ -1145,7 +1148,7 @@ function handleWsMessage(ws, msg) {
         sender_code: 'system',
         sender_name: 'System',
         avatar_color: '#2563eb',
-        message: `🔄 Canvas restored to milestone '${msg.title}' by Host ${meta.user_name}.`,
+        message: `🔄 Canvas restored to milestone '${msg.title || 'Instance'}' by Host ${meta.user_name}.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         is_system: true
       };
@@ -1576,25 +1579,44 @@ function handleWsMessage(ws, msg) {
       break;
     }
 
-    // 19. Broadcast Instance Show Mode to All Members (Strictly Host Only)
+    // 19. Broadcast Instance Show Mode to All Members (Strictly Host / Cohost Only)
     case 'broadcast_instance_show': {
       if (!meta.room_code) return;
-      const room = db.getRoom(meta.room_code);
-      const isHost = room?.host_user_code?.trim().toUpperCase() === meta.user_code?.trim().toUpperCase();
+      const { isHost, perms } = getMemberPermissions(meta.room_code, meta.user_code);
 
-      if (!isHost) {
+      if (!isHost && perms.role !== 'cohost') {
         return ws.send(JSON.stringify({
           type: 'error',
           text: 'Restricted: Only the host can broadcast an instance sandbox onto everyone’s canvas.'
         }));
       }
 
+      let snap = msg.snapshot || msg.actions || [];
+      if (typeof snap === 'string') {
+        try { snap = JSON.parse(snap); } catch(e) { snap = []; }
+      }
+      if (!Array.isArray(snap)) snap = [];
+
       broadcastToRoom(meta.room_code, {
         type: 'show_instance_broadcast',
         instance_id: msg.instance_id,
-        title: msg.title,
-        snapshot: msg.snapshot,
+        title: msg.title || 'Sandbox Instance',
+        snapshot: snap,
+        actions: snap,
         broadcaster_name: meta.user_name
+      });
+      break;
+    }
+
+    // 20. Dismiss Instance Broadcast (Return all members to live room)
+    case 'dismiss_instance_broadcast': {
+      if (!meta.room_code) return;
+      const { isHost, perms } = getMemberPermissions(meta.room_code, meta.user_code);
+      if (!isHost && perms.role !== 'cohost') return;
+
+      broadcastToRoom(meta.room_code, {
+        type: 'dismiss_instance_broadcast',
+        by: meta.user_name
       });
       break;
     }

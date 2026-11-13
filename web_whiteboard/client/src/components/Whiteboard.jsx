@@ -11,6 +11,29 @@ import PublicWorksModal from './PublicWorksModal';
 import SaveDestinationModal from './SaveDestinationModal';
 import ErrorBoundary from './ErrorBoundary';
 import PromptModal from './PromptModal';
+import ConfirmModal from './ConfirmModal';
+
+function parseActionsSafely(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    try {
+      return JSON.parse(JSON.stringify(val));
+    } catch(e) {
+      return [...val];
+    }
+  }
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed;
+      if (typeof parsed === 'string') {
+        const double = JSON.parse(parsed);
+        if (Array.isArray(double)) return double;
+      }
+    } catch(e) {}
+  }
+  return [];
+}
 import { recognizeInkStrokes } from '../utils/inkToFont';
 import {
   Users,
@@ -120,6 +143,24 @@ export default function Whiteboard({
         setPromptConfig(null);
       },
       onClose: () => setPromptConfig(null)
+    });
+  }, []);
+
+  // Custom Confirm Modal State (Replaces native window.confirm)
+  const [confirmConfig, setConfirmConfig] = useState(null); // { isOpen, title, message, confirmText, cancelText, confirmColor, onConfirm }
+  const showConfirm = useCallback((title, message, onConfirm, { confirmText = 'Confirm', cancelText = 'Cancel', confirmColor = 'teal' } = {}) => {
+    setConfirmConfig({
+      isOpen: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      confirmColor,
+      onConfirm: () => {
+        onConfirm();
+        setConfirmConfig(null);
+      },
+      onClose: () => setConfirmConfig(null)
     });
   }, []);
 
@@ -472,12 +513,16 @@ export default function Whiteboard({
         break;
       }
 
-      case 'snapshot_restored':
+      case 'snapshot_restored': {
+        const cleanActs = parseActionsSafely(msg.actions || msg.snapshot);
         setViewingInstance(null);
-        setActions(msg.actions || []);
+        setSandboxViewMode('sandbox');
+        setActions(cleanActs);
+        setRedoStack([]);
         setStatusText(`Canvas restored to milestone '${msg.title}' by ${msg.restored_by}`);
         showNotification(`🔄 Canvas restored to milestone '${msg.title}' by ${msg.restored_by}`);
         break;
+      }
 
       case 'new_public_work': {
         const pw = msg.public_work || msg.work;
@@ -514,21 +559,35 @@ export default function Whiteboard({
         showNotification(`⚠️ ${msg.text || 'Action error'}`);
         break;
 
-      case 'instance_snapshot_updated':
-        setMilestones(prev => prev.map(m => m.id === msg.instance_id ? { ...m, snapshot: msg.snapshot } : m));
+      case 'instance_snapshot_updated': {
+        const cleanSnap = parseActionsSafely(msg.snapshot);
+        setMilestones(prev => prev.map(m => m.id === msg.instance_id ? { ...m, snapshot: cleanSnap, host_sandbox: cleanSnap } : m));
         if (viewingInstance && viewingInstance.id === msg.instance_id) {
-          setViewingInstance(prev => ({ ...prev, actions: msg.snapshot }));
+          setViewingInstance(prev => ({ ...prev, actions: cleanSnap, host_sandbox: cleanSnap }));
         }
         showNotification('Milestone instance snapshot updated');
         break;
+      }
 
-      case 'show_instance_broadcast':
+      case 'show_instance_broadcast': {
+        const snap = parseActionsSafely(msg.actions || msg.snapshot);
         setViewingInstance({
           id: msg.instance_id,
-          title: msg.title,
-          actions: msg.actions || []
+          title: msg.title || 'Live Sandbox Instance',
+          actions: snap,
+          original_snapshot: snap,
+          host_sandbox: snap,
+          is_public: true
         });
-        showNotification(`📡 Host presented instance "${msg.title}" to everyone`);
+        setSandboxViewMode('sandbox');
+        showNotification(`📡 Host broadcasted sandbox instance "${msg.title || 'Instance'}" to everyone live!`);
+        break;
+      }
+
+      case 'dismiss_instance_broadcast':
+        setViewingInstance(null);
+        setSandboxViewMode('sandbox');
+        showNotification('🚀 Host closed instance broadcast. Returned to live whiteboard.');
         break;
 
       case 'connected_users_list':
@@ -537,16 +596,21 @@ export default function Whiteboard({
 
       case 'received_session_bundle': {
         showNotification(`📦 ${msg.sender_name} shared a whiteboard bundle with you!`);
-        if (window.confirm(`${msg.sender_name} shared a complete whiteboard session bundle ("${msg.bundle?.title || 'Shared Board'}"). Would you like to download this file?`)) {
-          const blob = new Blob([JSON.stringify(msg.bundle, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.download = `${(msg.bundle?.title || 'shared_board').replace(/[^a-zA-Z0-9]/g, '_')}_shared.whiteboard`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }
+        showConfirm(
+          'Download Whiteboard Bundle',
+          `${msg.sender_name} shared a complete whiteboard session bundle ("${msg.bundle?.title || 'Shared Board'}"). Would you like to download this file?`,
+          () => {
+            const blob = new Blob([JSON.stringify(msg.bundle, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.download = `${(msg.bundle?.title || 'shared_board').replace(/[^a-zA-Z0-9]/g, '_')}_shared.whiteboard`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          },
+          { confirmText: 'Download', confirmColor: 'blue' }
+        );
         break;
       }
 
@@ -2337,9 +2401,15 @@ export default function Whiteboard({
 
   const handleClearCanvas = () => {
     if (viewingInstance) {
-      if (window.confirm('Clear all drawings in this sandbox instance?')) {
-        setViewingInstance(prev => ({ ...prev, actions: [] }));
-      }
+      showConfirm(
+        'Clear Sandbox Instance',
+        'Clear all drawings and items in this sandbox simulation?',
+        () => {
+          setViewingInstance(prev => ({ ...prev, actions: [] }));
+          showNotification('🧹 Cleared drawings in sandbox instance');
+        },
+        { confirmText: 'Clear Sandbox', confirmColor: 'red' }
+      );
       return;
     }
 
@@ -2347,12 +2417,19 @@ export default function Whiteboard({
       showNotification('⚠️ Only the host or co-host can clear the canvas for all participants.');
       return;
     }
-    if (window.confirm('Clear all drawings and items on the whiteboard?')) {
-      setActions([]);
-      if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'clear_canvas' }));
-      }
-    }
+    showConfirm(
+      'Clear Collaborative Whiteboard',
+      'Clear all drawings and items on the whiteboard for everyone in this session?',
+      () => {
+        setActions([]);
+        setRedoStack([]);
+        if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'clear_canvas' }));
+        }
+        showNotification('🧹 Whiteboard canvas cleared');
+      },
+      { confirmText: 'Clear Board', confirmColor: 'red' }
+    );
   };
 
   // ── INK-TO-FONT HANDWRITING ENGINE ─────────────────────────────────
@@ -2454,15 +2531,20 @@ export default function Whiteboard({
   };
 
   const handleKickMember = (targetUserCode) => {
-    if (window.confirm('Remove this member from the session?')) {
-      if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'host_control',
-          action: 'kick',
-          target_user_code: targetUserCode
-        }));
-      }
-    }
+    showConfirm(
+      'Remove Member',
+      'Remove this member from the session?',
+      () => {
+        if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'host_control',
+            action: 'kick',
+            target_user_code: targetUserCode
+          }));
+        }
+      },
+      { confirmText: 'Remove', confirmColor: 'red' }
+    );
   };
 
   const handleAddMember = (target) => {
@@ -2883,12 +2965,24 @@ export default function Whiteboard({
       showNotification('🔒 Restricted: Only the host has permission to restore canvas instances to the live whiteboard.');
       return;
     }
+    const cleanActions = parseActionsSafely(snapshot);
     setViewingInstance(null);
-    setActions(snapshot || []);
-    if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'restore_milestone', actions: snapshot, title }));
+    setSandboxViewMode('sandbox');
+    setActions(cleanActions);
+    setRedoStack([]);
+
+    if (isOffline) {
+      try {
+        localStorage.setItem(`offline_actions_${room?.code || 'local'}`, JSON.stringify(cleanActions));
+      } catch(e) {}
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'restore_milestone',
+        actions: cleanActions,
+        title: title || 'Restored Milestone'
+      }));
     }
-    showNotification(`🔄 Canvas restored to milestone "${title}"`);
+    showNotification(`🔄 Canvas restored to milestone "${title || 'Instance'}"`);
   };
 
   const handleReturnToLiveState = () => {
@@ -2902,16 +2996,28 @@ export default function Whiteboard({
       showNotification('🔒 Only the host can broadcast an instance to all members.');
       return;
     }
-    const snapToBroadcast = (sandboxViewMode === 'original' ? (ms.original_snapshot || ms.snapshot) : (ms.host_sandbox || ms.snapshot || ms.actions)) || [];
+    let rawSnap = [];
+    if (viewingInstance && viewingInstance.id === ms.id) {
+      rawSnap = sandboxViewMode === 'original'
+        ? (viewingInstance.original_snapshot || viewingInstance.actions)
+        : sandboxViewMode === 'host_sandbox'
+        ? (viewingInstance.host_sandbox || viewingInstance.actions)
+        : (viewingInstance.actions || viewingInstance.snapshot);
+    } else {
+      rawSnap = ms.actions || ms.host_sandbox || ms.snapshot || ms.original_snapshot || [];
+    }
+    const snapToBroadcast = parseActionsSafely(rawSnap);
+
     if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'broadcast_instance_show',
         instance_id: ms.id,
-        title: ms.title,
-        snapshot: snapToBroadcast
+        title: ms.title || 'Sandbox Instance',
+        snapshot: snapToBroadcast,
+        actions: snapToBroadcast
       }));
     }
-    showNotification(`📡 Broadcasted sandbox instance "${ms.title}" to everyone on live canvas!`);
+    showNotification(`📡 Broadcasted sandbox instance "${ms.title || 'Instance'}" to everyone on live canvas!`);
   };
 
   const handleShareWithMember = (targetUserCode) => {
@@ -3190,10 +3296,27 @@ export default function Whiteboard({
               <button
                 onClick={() => handleBroadcastShowInstance(viewingInstance)}
                 title="Host Action: Broadcast this sandbox view to all members live on their canvas"
-                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold border border-amber-400"
+                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold border border-amber-400 cursor-pointer"
               >
                 <Radio className="w-3.5 h-3.5 text-white" />
                 <span className="hidden md:inline">Show on Live Canva</span>
+              </button>
+            )}
+
+            {/* Host Control: Dismiss Broadcast for All */}
+            {isHost && (
+              <button
+                onClick={() => {
+                  if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'dismiss_instance_broadcast' }));
+                  }
+                  handleReturnToLiveState();
+                }}
+                title="Host Action: Close broadcast and return everyone to live whiteboard"
+                className="px-2 py-1 bg-amber-800 hover:bg-amber-900 text-amber-100 rounded-lg transition flex items-center gap-1 text-xs font-bold cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">Dismiss Broadcast</span>
               </button>
             )}
 
@@ -3204,12 +3327,15 @@ export default function Whiteboard({
                   const snap = sandboxViewMode === 'original'
                     ? (viewingInstance.original_snapshot || viewingInstance.actions)
                     : (viewingInstance.actions || viewingInstance.snapshot);
-                  if (window.confirm(`Restore live canvas to "${viewingInstance.title}" (${sandboxViewMode})?`)) {
-                    handleRestoreMilestone(snap, viewingInstance.title);
-                  }
+                  showConfirm(
+                    'Restore Collaborative Canvas',
+                    `Restore live canvas to "${viewingInstance.title}" (${sandboxViewMode})?\n\nThis will apply this instance's drawings to everyone's active whiteboard.`,
+                    () => handleRestoreMilestone(snap, viewingInstance.title),
+                    { confirmText: 'Restore Live', confirmColor: 'teal' }
+                  );
                 }}
                 title="Host Action: Restore this instance state to live whiteboard"
-                className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold shadow-xs"
+                className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition flex items-center gap-1 text-xs font-bold shadow-xs cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Restore to Live</span>
@@ -3521,12 +3647,15 @@ export default function Whiteboard({
           privateMilestones={privateMilestones}
           onSaveMilestone={handlePublishMilestone}
           onShowInstance={(ms) => {
+            const cleanActs = parseActionsSafely(ms.actions || ms.snapshot);
+            const cleanOrig = parseActionsSafely(ms.original_snapshot || ms.snapshot || ms.actions);
+            const cleanHost = ms.host_sandbox ? parseActionsSafely(ms.host_sandbox) : null;
             setViewingInstance({
               id: ms.id,
               title: ms.title,
-              actions: JSON.parse(JSON.stringify(ms.snapshot || [])),
-              original_snapshot: JSON.parse(JSON.stringify(ms.original_snapshot || ms.snapshot || [])),
-              host_sandbox: ms.host_sandbox ? JSON.parse(JSON.stringify(ms.host_sandbox)) : null,
+              actions: cleanActs,
+              original_snapshot: cleanOrig,
+              host_sandbox: cleanHost,
               is_public: ms.is_public !== false
             });
             setSandboxViewMode('sandbox');
@@ -3534,7 +3663,12 @@ export default function Whiteboard({
           }}
           onBroadcastShow={handleBroadcastShowInstance}
           onRestoreMilestone={(snapshot, title) => {
-            handleRestoreMilestone(snapshot, title);
+            showConfirm(
+              'Restore Collaborative Canvas',
+              `Restore live canvas to "${title}"?\n\nThis will apply this instance's drawings to everyone's active whiteboard.`,
+              () => handleRestoreMilestone(snapshot, title),
+              { confirmText: 'Restore Live', confirmColor: 'teal' }
+            );
           }}
           onDeleteMilestone={handleDeleteMilestone}
           canRestore={isHost}
@@ -3600,6 +3734,18 @@ export default function Whiteboard({
         initialValue={promptConfig?.initialValue}
         onConfirm={promptConfig?.onConfirm}
         onClose={promptConfig?.onClose}
+      />
+
+      {/* Dynamic Custom Confirm Modal (Eliminates native window.confirm) */}
+      <ConfirmModal
+        isOpen={Boolean(confirmConfig?.isOpen)}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmText={confirmConfig?.confirmText}
+        cancelText={confirmConfig?.cancelText}
+        confirmColor={confirmConfig?.confirmColor}
+        onConfirm={confirmConfig?.onConfirm}
+        onClose={confirmConfig?.onClose}
       />
 
       {/* Bottom Status Pill */}

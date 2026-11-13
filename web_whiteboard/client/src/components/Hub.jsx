@@ -22,6 +22,7 @@ import {
   Download
 } from 'lucide-react';
 import PromptModal from './PromptModal';
+import ConfirmModal from './ConfirmModal';
 
 export default function Hub({
   user,
@@ -44,6 +45,7 @@ export default function Hub({
   const [copiedLanUrl, setCopiedLanUrl] = useState(false);
   const [copiedPublicUrl, setCopiedPublicUrl] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [confirmConfig, setConfirmConfig] = useState(null);
   const [showPersonalBoardPrompt, setShowPersonalBoardPrompt] = useState(false);
   const [isStandaloneApp, setIsStandaloneApp] = useState(false);
   const [showAppModal, setShowAppModal] = useState(false);
@@ -203,11 +205,19 @@ export default function Hub({
 
   const handleDeletePersonalBoard = (id, e) => {
     e.stopPropagation();
-    if (window.confirm('Delete this local personal board?')) {
-      const updated = personalBoards.filter(b => b.id !== id);
-      savePersonalBoards(updated);
-      localStorage.removeItem(`offline_actions_${id}`);
-    }
+    setConfirmConfig({
+      title: 'Delete Personal Board',
+      message: 'Are you sure you want to delete this local personal board? All saved items on it will be removed.',
+      confirmText: 'Delete',
+      confirmColor: 'red',
+      onConfirm: () => {
+        const updated = personalBoards.filter(b => b.id !== id);
+        savePersonalBoards(updated);
+        localStorage.removeItem(`offline_actions_${id}`);
+        setConfirmConfig(null);
+      },
+      onClose: () => setConfirmConfig(null)
+    });
   };
 
   const handleCreateGroupRoom = async (mode) => {
@@ -1115,6 +1125,17 @@ export default function Hub({
         confirmText="Create Workspace"
         onConfirm={handleConfirmCreatePersonalBoard}
         onClose={() => setShowPersonalBoardPrompt(false)}
+      />
+
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={Boolean(confirmConfig)}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmText={confirmConfig?.confirmText}
+        confirmColor={confirmConfig?.confirmColor}
+        onConfirm={confirmConfig?.onConfirm}
+        onClose={() => setConfirmConfig(null)}
       />
     </div>
   );

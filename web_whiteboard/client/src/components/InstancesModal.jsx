@@ -225,10 +225,29 @@ export default function InstancesModal({
                   const msTitle = ms.title || 'Untitled Instance';
                   const msAuthor = ms.author_name || ms.author || 'User';
                   const msTime = ms.timestamp || '';
-                  const snapshotList = Array.isArray(ms.snapshot) ? ms.snapshot : Array.isArray(ms.actions) ? ms.actions : [];
+                  
+                  let snapshotList = [];
+                  if (Array.isArray(ms.snapshot)) snapshotList = ms.snapshot;
+                  else if (Array.isArray(ms.actions)) snapshotList = ms.actions;
+                  else if (typeof ms.snapshot === 'string') {
+                    try { snapshotList = JSON.parse(ms.snapshot); } catch(e){}
+                  } else if (typeof ms.snapshot_json === 'string') {
+                    try { snapshotList = JSON.parse(ms.snapshot_json); } catch(e){}
+                  }
+                  if (typeof snapshotList === 'string') {
+                    try { snapshotList = JSON.parse(snapshotList); } catch(e){}
+                  }
+                  if (!Array.isArray(snapshotList)) snapshotList = [];
+
                   const actCount = snapshotList.filter(a => a && !a.undone).length;
                   const isPublic = ms.is_public !== false;
                   const canDelete = isHost || ms.author_code === currentUserCode || !isPublic;
+
+                  const preparedMs = {
+                    ...ms,
+                    snapshot: snapshotList,
+                    actions: snapshotList
+                  };
 
                   return (
                     <div
@@ -261,11 +280,11 @@ export default function InstancesModal({
                         {/* 1. SHOW / WORK IN SANDBOX (Always available to everyone) */}
                         <button
                           onClick={() => {
-                            if (onShowInstance) onShowInstance(ms);
+                            if (onShowInstance) onShowInstance(preparedMs);
                             onClose();
                           }}
                           title="Simulate and work in this isolated instance without modifying live canvas"
-                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 transition shadow-2xs"
+                          className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1 transition shadow-2xs cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5 text-amber-600" />
                           Show / Sandbox
@@ -275,11 +294,11 @@ export default function InstancesModal({
                         {isHost && onBroadcastShow && isPublic && (
                           <button
                             onClick={() => {
-                              onBroadcastShow(ms);
+                              onBroadcastShow(preparedMs);
                               onClose();
                             }}
                             title="Host Action: Broadcast instance sandbox view to all members live"
-                            className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition"
+                            className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition cursor-pointer"
                           >
                             <Radio className="w-3.5 h-3.5" />
                           </button>
@@ -293,7 +312,7 @@ export default function InstancesModal({
                               onClose();
                             }}
                             title="Host Action: Restore live collaborative canvas to this milestone"
-                            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition"
+                            className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                             Restore
