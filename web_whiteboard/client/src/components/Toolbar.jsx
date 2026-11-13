@@ -75,13 +75,32 @@ export default function Toolbar({
         </div>
       )}
 
-      {/* Selection Tool */}
+      {/* Selection Tool (Marquee / Box Drag Select like on Windows) */}
       <button
         onClick={() => setActiveTool('select')}
-        title="Selection Tool (V or S): Select, drag, resize, or delete elements"
-        className={`p-2 rounded-xl transition ${activeTool === 'select' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+        title="Selection Tool (V): Click & drag across canvas to box-select elements like on Windows"
+        className={`px-2.5 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs font-bold ${
+          activeTool === 'select'
+            ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-400'
+            : 'text-slate-700 hover:bg-slate-100 bg-slate-50 border border-slate-200'
+        }`}
       >
         <SquareDashedMousePointer className="w-4 h-4" />
+        <span className="hidden sm:inline">Select</span>
+      </button>
+
+      {/* Snap Area Screenshot Tool */}
+      <button
+        onClick={() => setActiveTool('snap')}
+        title="Snap Tool: Click & drag any rectangular box to snip & take area screenshot"
+        className={`px-2.5 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs font-bold ${
+          activeTool === 'snap'
+            ? 'bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-400'
+            : 'text-cyan-800 hover:bg-cyan-100 bg-cyan-50 border border-cyan-300'
+        }`}
+      >
+        <Crop className="w-4 h-4 text-cyan-600" />
+        <span className="hidden sm:inline">Snap</span>
       </button>
 
       {/* Pan / Hand Tool for Infinite Canvas */}
@@ -91,15 +110,6 @@ export default function Toolbar({
         className={`p-2 rounded-xl transition ${activeTool === 'pan' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
       >
         <Hand className="w-4 h-4" />
-      </button>
-
-      {/* Snap Area Screenshot Tool */}
-      <button
-        onClick={() => setActiveTool('snap')}
-        title="Snap Area Screenshot (Crop): Drag any rectangular region to capture & save screenshot"
-        className={`p-2 rounded-xl transition ${activeTool === 'snap' ? 'bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-400' : 'text-slate-600 hover:bg-slate-100'}`}
-      >
-        <Crop className="w-4 h-4" />
       </button>
 
       {/* Primary Drawing Tools */}

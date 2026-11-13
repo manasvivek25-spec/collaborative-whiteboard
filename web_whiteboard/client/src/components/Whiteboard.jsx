@@ -775,6 +775,77 @@ export default function Whiteboard({
     return null;
   }
 
+  function pointToSegmentDistSq(px, py, x1, y1, x2, y2) {
+    const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+    if (l2 === 0) return (px - x1) ** 2 + (py - y1) ** 2;
+    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return (px - (x1 + t * (x2 - x1))) ** 2 + (py - (y1 + t * (y2 - y1))) ** 2;
+  }
+
+  function isPointInsideAction(act, x, y, curZoom = 1) {
+    if (!act || act.undone) return false;
+
+    // Fast broad bounding box rejection
+    const b = getActionBBox(act);
+    if (!b) return false;
+    const pad = Math.max(10, 10 / curZoom);
+    if (x < b.x - pad || x > b.x + b.w + pad || y < b.y - pad || y > b.y + b.h + pad) {
+      return false;
+    }
+
+    if (act.kind === 'sticky' || act.kind === 'table' || act.kind === 'text') {
+      return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+    }
+
+    if (act.kind === 'rect' || act.kind === 'rounded_rect') {
+      if (act.fill && act.fill !== 'transparent' && act.fill !== 'none') {
+        return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+      }
+      const nearLeft = Math.abs(x - b.x) <= pad && y >= b.y - pad && y <= b.y + b.h + pad;
+      const nearRight = Math.abs(x - (b.x + b.w)) <= pad && y >= b.y - pad && y <= b.y + b.h + pad;
+      const nearTop = Math.abs(y - b.y) <= pad && x >= b.x - pad && x <= b.x + b.w + pad;
+      const nearBottom = Math.abs(y - (b.y + b.h)) <= pad && x >= b.x - pad && x <= b.x + b.w + pad;
+      return nearLeft || nearRight || nearTop || nearBottom;
+    }
+
+    if (act.kind === 'circle') {
+      const cx = b.x + b.w / 2;
+      const cy = b.y + b.h / 2;
+      const r = Math.min(b.w, b.h) / 2;
+      const d = Math.hypot(x - cx, y - cy);
+      if (act.fill && act.fill !== 'transparent' && act.fill !== 'none') {
+        return d <= r + pad;
+      }
+      return Math.abs(d - r) <= pad;
+    }
+
+    if (act.kind === 'line' || act.kind === 'arrow') {
+      const thresh = Math.max(10, (act.width || 4) * 1.5) / curZoom;
+      const distSq = pointToSegmentDistSq(x, y, act.x1, act.y1, act.x2, act.y2);
+      return distSq <= thresh * thresh;
+    }
+
+    if (act.kind === 'stroke') {
+      const pts = act.points;
+      if (!pts || pts.length < 1) return false;
+      const thresh = Math.max(10, (act.width || 4) * 1.5) / curZoom;
+      const threshSq = thresh * thresh;
+
+      if (pts.length === 1) {
+        return ((x - pts[0][0]) ** 2 + (y - pts[0][1]) ** 2) <= threshSq;
+      }
+
+      for (let i = 0; i < pts.length - 1; i++) {
+        const dSq = pointToSegmentDistSq(x, y, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+        if (dSq <= threshSq) return true;
+      }
+      return false;
+    }
+
+    return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+  }
+
   // ── REDRAW CANVAS ENGINE ───────────────────────────────────────────
   const redrawCanvas = useCallback(() => {
     // 1. Draw Background Grid
@@ -1353,6 +1424,148 @@ export default function Whiteboard({
       return;
     }
 
+    // ── SNAP AREA SCREENSHOT TOOL (Highest Priority) ─────────────────────
+    if (activeTool === 'snap') {
+      setSnapBox({ startX: x, startY: y, currentX: x, currentY: y });
+      return;
+    }
+
+    // ── GENERIC SELECTION TOOL (Windows-style Marquee & Drag) ────────────
+    if (activeTool === 'select') {
+      // 1. Group interaction if multiple elements selected
+      if (selectedIds && selectedIds.length > 1) {
+        const bboxes = selectedIds.map(id => {
+          const a = currentDisplayActions.find(act => act.id === id && !act.undone);
+          return a ? getActionBBox(a) : null;
+        }).filter(Boolean);
+
+        if (bboxes.length > 0) {
+          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          bboxes.forEach(b => {
+            if (b.x < minX) minX = b.x;
+            if (b.y < minY) minY = b.y;
+            if (b.x + b.w > maxX) maxX = b.x + b.w;
+            if (b.y + b.h > maxY) maxY = b.y + b.h;
+          });
+          const groupW = maxX - minX;
+
+          // Check click on group delete button
+          if (x >= minX + groupW - 14 && x <= minX + groupW + 8 && y >= minY - 32 && y <= minY - 10) {
+            selectedIds.forEach(id => {
+              const act = currentDisplayActions.find(a => a.id === id);
+              if (act) commitAction({ ...act, undone: true });
+            });
+            showNotification(`${selectedIds.length} items deleted`);
+            setSelectedIds([]);
+            setSelectedId(null);
+            return;
+          }
+
+          // Check click on group move pill or on ANY selected element
+          const clickedOnSelectedItem = selectedIds.some(id => {
+            const act = currentDisplayActions.find(a => a.id === id);
+            return isPointInsideAction(act, x, y, zoom);
+          });
+          const insideGroup = (x >= minX - 6 && x <= maxX + 6 && y >= minY - 32 && y <= maxY + 6);
+
+          if (clickedOnSelectedItem || insideGroup) {
+            setSelectedDrag({
+              items: selectedIds.map(id => {
+                const act = currentDisplayActions.find(a => a.id === id);
+                return act ? { id: act.id, act: JSON.parse(JSON.stringify(act)) } : null;
+              }).filter(Boolean),
+              startX: x,
+              startY: y
+            });
+            return;
+          }
+        }
+      }
+
+      // 2. Single item selection handles
+      if (selectedId) {
+        const selAct = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
+        if (selAct) {
+          const bbox = getActionBBox(selAct);
+          if (bbox) {
+            // Delete handle
+            if (x >= bbox.x + bbox.w - 20 && x <= bbox.x + bbox.w && y >= bbox.y - 26 && y <= bbox.y - 6) {
+              commitAction({ ...selAct, undone: true });
+              setSelectedId(null);
+              setSelectedIds([]);
+              showNotification('Item deleted');
+              return;
+            }
+
+            // Drag handle pill
+            if (x >= bbox.x && x <= bbox.x + 64 && y >= bbox.y - 26 && y <= bbox.y - 6) {
+              setSelectedDrag({
+                id: selAct.id,
+                items: [{ id: selAct.id, act: JSON.parse(JSON.stringify(selAct)) }],
+                startX: x,
+                startY: y
+              });
+              return;
+            }
+
+            // Resize handle
+            if (Math.hypot(x - (bbox.x + bbox.w), y - (bbox.y + bbox.h)) < 18 / zoom) {
+              setSelectedResize({
+                id: selAct.id,
+                startX: x,
+                startY: y,
+                act: JSON.parse(JSON.stringify(selAct)),
+                origW: bbox.w,
+                origH: bbox.h
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      // 3. Pixel-accurate hit-test on all visible actions
+      let hitId = null;
+      for (let i = currentDisplayActions.length - 1; i >= 0; i--) {
+        const act = currentDisplayActions[i];
+        if (act.undone) continue;
+        if (isPointInsideAction(act, x, y, zoom)) {
+          hitId = act.id;
+          break;
+        }
+      }
+
+      if (hitId) {
+        setSelectedId(hitId);
+        setSelectedIds([hitId]);
+        const hitAct = currentDisplayActions.find(a => a.id === hitId);
+
+        // Double click text to edit
+        if (hitAct && hitAct.kind === 'text' && e.detail === 2) {
+          showPrompt('Edit Canvas Text', '', hitAct.text || '', (newText) => {
+            if (newText !== null && newText !== hitAct.text) {
+              commitAction({ ...hitAct, text: newText });
+            }
+          });
+          return;
+        }
+
+        setSelectedDrag({
+          id: hitId,
+          items: [{ id: hitId, act: JSON.parse(JSON.stringify(hitAct)) }],
+          startX: x,
+          startY: y
+        });
+        return;
+      }
+
+      // 4. Clicked on empty space: clear selection and start Windows-style marquee box selection
+      setSelectedId(null);
+      setSelectedIds([]);
+      setSelectionBox({ startX: x, startY: y, currentX: x, currentY: y });
+      return;
+    }
+
     // ── INTERACTION WITH TABLES ─────────────────────────────────────────
     const tables = currentDisplayActions.filter(a => a.kind === 'table' && !a.undone);
     for (let i = tables.length - 1; i >= 0; i--) {
@@ -1504,144 +1717,6 @@ export default function Whiteboard({
         setIsDrawing(false);
         return;
       }
-    }
-
-    // ── SNAP AREA SCREENSHOT TOOL ───────────────────────────────────────
-    if (activeTool === 'snap') {
-      setSnapBox({ startX: x, startY: y, currentX: x, currentY: y });
-      return;
-    }
-
-    // ── GENERIC SELECTION TOOL INTERACTION ───────────────────────────────
-    if (activeTool === 'select') {
-      // Group interaction if multiple elements selected
-      if (selectedIds && selectedIds.length > 1) {
-        const bboxes = selectedIds.map(id => {
-          const a = currentDisplayActions.find(act => act.id === id && !act.undone);
-          return a ? getActionBBox(a) : null;
-        }).filter(Boolean);
-
-        if (bboxes.length > 0) {
-          let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          bboxes.forEach(b => {
-            if (b.x < minX) minX = b.x;
-            if (b.y < minY) minY = b.y;
-            if (b.x + b.w > maxX) maxX = b.x + b.w;
-            if (b.y + b.h > maxY) maxY = b.y + b.h;
-          });
-          const groupW = maxX - minX;
-
-          // Check click on group delete button
-          if (x >= minX + groupW - 14 && x <= minX + groupW + 8 && y >= minY - 32 && y <= minY - 10) {
-            selectedIds.forEach(id => {
-              const act = currentDisplayActions.find(a => a.id === id);
-              if (act) commitAction({ ...act, undone: true });
-            });
-            showNotification(`${selectedIds.length} items deleted`);
-            setSelectedIds([]);
-            setSelectedId(null);
-            return;
-          }
-
-          // Check click on group move pill or inside group bounds
-          const insideGroup = (x >= minX - 6 && x <= maxX + 6 && y >= minY - 32 && y <= maxY + 6);
-          if (insideGroup) {
-            setSelectedDrag({
-              items: selectedIds.map(id => {
-                const act = currentDisplayActions.find(a => a.id === id);
-                return act ? { id: act.id, act: JSON.parse(JSON.stringify(act)) } : null;
-              }).filter(Boolean),
-              startX: x,
-              startY: y
-            });
-            return;
-          }
-        }
-      }
-
-      if (selectedId) {
-        const selAct = currentDisplayActions.find(a => a.id === selectedId && !a.undone);
-        if (selAct) {
-          const bbox = getActionBBox(selAct);
-          if (bbox) {
-            // Delete handle
-            if (x >= bbox.x + bbox.w - 20 && x <= bbox.x + bbox.w && y >= bbox.y - 26 && y <= bbox.y - 6) {
-              commitAction({ ...selAct, undone: true });
-              setSelectedId(null);
-              setSelectedIds([]);
-              showNotification('Item deleted');
-              return;
-            }
-
-            // Drag handle pill
-            if (x >= bbox.x && x <= bbox.x + 64 && y >= bbox.y - 26 && y <= bbox.y - 6) {
-              setSelectedDrag({
-                id: selAct.id,
-                items: [{ id: selAct.id, act: JSON.parse(JSON.stringify(selAct)) }],
-                startX: x,
-                startY: y
-              });
-              return;
-            }
-
-            // Resize handle
-            if (Math.hypot(x - (bbox.x + bbox.w), y - (bbox.y + bbox.h)) < 18 / zoom) {
-              setSelectedResize({
-                id: selAct.id,
-                startX: x,
-                startY: y,
-                act: JSON.parse(JSON.stringify(selAct)),
-                origW: bbox.w,
-                origH: bbox.h
-              });
-              return;
-            }
-          }
-        }
-      }
-
-      // Hit-test all actions top-down
-      let hitId = null;
-      for (let i = currentDisplayActions.length - 1; i >= 0; i--) {
-        const act = currentDisplayActions[i];
-        if (act.undone) continue;
-        const bbox = getActionBBox(act);
-        if (bbox && x >= bbox.x && x <= bbox.x + bbox.w && y >= bbox.y && y <= bbox.y + bbox.h) {
-          hitId = act.id;
-          break;
-        }
-      }
-
-      if (hitId) {
-        setSelectedId(hitId);
-        setSelectedIds([hitId]);
-        const hitAct = currentDisplayActions.find(a => a.id === hitId);
-        // Double click on text to edit
-        if (hitAct && hitAct.kind === 'text' && e.detail === 2) {
-          if (myPermissions.can_draw || viewingInstance) {
-            showPrompt('Edit Canvas Text', '', hitAct.text || '', (newText) => {
-              if (newText !== null && newText !== hitAct.text) {
-                commitAction({ ...hitAct, text: newText });
-              }
-            });
-          }
-          return;
-        }
-
-        setSelectedDrag({
-          id: hitId,
-          items: [{ id: hitId, act: JSON.parse(JSON.stringify(hitAct)) }],
-          startX: x,
-          startY: y
-        });
-        return;
-      }
-
-      // Clicked on empty space: clear selection and start drag-selection marquee
-      setSelectedId(null);
-      setSelectedIds([]);
-      setSelectionBox({ startX: x, startY: y, currentX: x, currentY: y });
-      return;
     }
 
     // Unselect if clicked elsewhere
@@ -1846,9 +1921,29 @@ export default function Whiteboard({
       return;
     }
 
-    // Handle Selection Marquee Box Dragging
+    // Handle Selection Marquee Box Dragging (Windows-style live item highlighting)
     if (selectionBox) {
-      setSelectionBox(prev => prev ? { ...prev, currentX: x, currentY: y } : null);
+      const curX = x;
+      const curY = y;
+      const minX = Math.min(selectionBox.startX, curX);
+      const maxX = Math.max(selectionBox.startX, curX);
+      const minY = Math.min(selectionBox.startY, curY);
+      const maxY = Math.max(selectionBox.startY, curY);
+
+      // Find all intersecting actions in real time as the marquee box expands
+      const liveMatched = [];
+      for (const act of currentDisplayActions) {
+        if (act.undone) continue;
+        const b = getActionBBox(act);
+        if (b) {
+          const intersects = !(b.x > maxX || b.x + b.w < minX || b.y > maxY || b.y + b.h < minY);
+          if (intersects) liveMatched.push(act.id);
+        }
+      }
+
+      setSelectedIds(liveMatched);
+      setSelectedId(liveMatched[0] || null);
+      setSelectionBox(prev => prev ? { ...prev, currentX: curX, currentY: curY } : null);
       return;
     }
 
@@ -2961,7 +3056,21 @@ export default function Whiteboard({
             className="px-2.5 sm:px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-2xs"
           >
             <Camera className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Export & Share</span>
+            <span className="hidden md:inline">Screenshot & Export</span>
+          </button>
+
+          {/* Dedicated Quick Snap Area Screenshot Trigger */}
+          <button
+            onClick={() => setActiveTool('snap')}
+            title="Snap Custom Canvas Area (Click and drag box to capture screenshot)"
+            className={`px-2.5 sm:px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 text-xs font-bold shadow-2xs ${
+              activeTool === 'snap'
+                ? 'bg-cyan-600 text-white ring-2 ring-cyan-400'
+                : 'bg-cyan-50 hover:bg-cyan-100 text-cyan-800 border border-cyan-300'
+            }`}
+          >
+            <Crop className="w-3.5 h-3.5 text-cyan-600" />
+            <span className="hidden sm:inline">Snap Area</span>
           </button>
 
           {/* Add Member button (Host & Co-host) */}
