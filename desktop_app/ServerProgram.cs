@@ -32,6 +32,16 @@ namespace CollaborativeWhiteboard
             string serverScript = Path.Combine(appDir, @"web_whiteboard\server\server.js");
             string serverDir = Path.Combine(appDir, @"web_whiteboard\server");
 
+            if (!File.Exists(serverScript))
+            {
+                string altScript = Path.Combine(appDir, @"server\server.js");
+                if (File.Exists(altScript))
+                {
+                    serverScript = altScript;
+                    serverDir = Path.Combine(appDir, @"server");
+                }
+            }
+
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("======================================================================");
             Console.WriteLine("   COLLABORATIVE WHITEBOARD - DEDICATED LAN SERVER HOST");

@@ -24,6 +24,17 @@ namespace CollaborativeWhiteboard
             string serverModules = Path.Combine(appDir, @"web_whiteboard\server\node_modules");
             string distIndex = Path.Combine(appDir, @"web_whiteboard\client\dist\index.html");
 
+            if (!File.Exists(serverScript))
+            {
+                string altScript = Path.Combine(appDir, @"server\server.js");
+                if (File.Exists(altScript))
+                {
+                    serverScript = altScript;
+                    serverModules = Path.Combine(appDir, @"server\node_modules");
+                    distIndex = Path.Combine(appDir, @"client\dist\index.html");
+                }
+            }
+
             // If a custom remote host is passed via command-line (e.g., Collaborative_Whiteboard.exe 10.36.112.55:5000)
             if (args != null && args.Length > 0 && !string.IsNullOrWhiteSpace(args[0]))
             {
