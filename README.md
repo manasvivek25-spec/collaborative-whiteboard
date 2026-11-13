@@ -28,34 +28,34 @@ This project submission is organized in accordance with the course deliverable r
 
 ---
 
-## 🚀 How to Run the Application (Zero Terminal Needed)
+## 🚀 How to Run the Application (Single-Click Execution)
 
-The application has been engineered so that end users **never need to open a terminal or run command-line commands**. Everything runs with standard 1-click Windows executables:
+The application is engineered so that users **never need to open a terminal, enter commands, or launch multiple windows**. Everything runs seamlessly from a single file:
 
-### 1. Hosting a Session (Server Host)
-1. Double-click **`Server_Application.exe`** (or **`Collaborative_Whiteboard.exe`**).
-2. The server initializes the Node.js WebSocket engine and prints:
-   * **Server Status:** ONLINE & LISTENING on Port 5000
-   * **Host Physical LAN IP:** e.g. `http://192.168.1.15:5000`
-   * **UDP Subnet Discovery:** Active on Port 45455 / 41234
-3. Press **`[O]`** to launch the whiteboard directly in your desktop browser.
-4. Create a room (e.g., Room Code: `SPZG`).
-5. Share your 4-letter room code or LAN IP with your friends/peers.
+### Primary Method: 1-Click All-in-One Launch (`Collaborative_Whiteboard.exe`)
+* **Double-click `Collaborative_Whiteboard.exe`** — that is all!
+* The background Node.js WebSocket engine boots silently, and the full-screen desktop whiteboard interface opens immediately on your screen.
+* **Both Hosting and Joining in One Window:**
+  * **To Host:** Click **"Create Room"** to start a session (e.g. Room Code: `SPZG`). Your LAN IP is displayed on the screen for friends to join.
+  * **To Auto-Join LAN Peers:** Whiteboards created by peers on the same Wi-Fi or mobile hotspot automatically appear under **"Active Whiteboards Discovered on Same LAN Subnet"** with a green **"Join Now"** button.
+  * **To Join via Code:** Enter the 4-letter room code and your name.
+* **Clean Auto-Exit:** When you close the whiteboard window, background services terminate automatically.
 
-### 2. Joining a Session (Client Machine)
-1. Ensure both devices are on the same Wi-Fi router, Ethernet switch, or mobile hotspot.
-2. Double-click **`Client_Application.exe`**.
-3. Choose one of two simple ways to join:
-   * **Via LAN IP:** Enter the Host's LAN IP address (e.g. `192.168.1.15:5000`) and click **"Connect to Whiteboard"**.
-   * **Via Localhost:** Click **"Join Local"** if collaborating on the same host computer.
-4. Alternatively, open **any web browser** (Chrome, Edge, Firefox, Safari) on any laptop, tablet, or phone and navigate to:
-   ```
-   http://<HOST-LAN-IP>:5000
-   ```
-5. On the lobby screen, discovered active whiteboards on your subnet appear automatically with a green **"Join Now"** card, or simply enter your Name and the 4-letter Room Code.
+---
 
-### 3. All-in-One 1-Click Desktop App
-* Double-click **`Collaborative_Whiteboard.exe`** to silently start the background services and open a dedicated borderless desktop application window with zero browser address bars or tabs.
+### Academic Modular Deliverables: Dedicated Server & Client Executables
+
+To strictly satisfy the course rubric's formal modular architecture, separate standalone executables are also provided:
+
+1. **`Server_Application.exe` [Course Deliverable 1 - Server Application]:**
+   * Double-click on any machine in the LAN to run the dedicated whiteboard server.
+   * Displays the server port (5000), discovery beacon port (45455), and host physical LAN IP (e.g. `http://192.168.1.15:5000`).
+   * Press `[O]` to open the whiteboard in your default browser, or press `[Q]` to shut down cleanly.
+
+2. **`Client_Application.exe` [Course Deliverable 2 - Client Application]:**
+   * Double-click on client machines to open a dedicated connection dialog.
+   * Enter the Host's LAN IP address or click **"Join Local"** to connect directly.
+   * Alternatively, client devices (laptops, iPads, phones) can simply open any web browser to `http://<HOST-LAN-IP>:5000`.
 
 ---
 
