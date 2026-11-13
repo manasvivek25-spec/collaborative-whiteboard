@@ -38,10 +38,10 @@ export default function InstancesModal({
 
   const handleSave = (e) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    const finalTitle = title.trim() || `Instance - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     if (onSaveMilestone) {
       onSaveMilestone({
-        title: title.trim(),
+        title: finalTitle,
         destination: saveDestination
       });
     }

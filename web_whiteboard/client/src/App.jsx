@@ -14,10 +14,42 @@ export default function App() {
     }
   });
 
-  const [currentView, setCurrentView] = useState('hub'); // 'hub' | 'whiteboard'
-  const [activeRoom, setActiveRoom] = useState(null);
-  const [isOfflineBoard, setIsOfflineBoard] = useState(false);
-  const [isAccountModalOpen, setIsAccountModalOpen] = useState(!user);
+  // Restore active session state from sessionStorage or URL on refresh/reload
+  const [initialSession] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('active_whiteboard_session');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.room) return parsed;
+      }
+    } catch (e) {}
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = params.get('room');
+      const offlineParam = params.get('offline');
+      const offlineCode = params.get('code');
+      if (offlineParam) {
+        return {
+          room: { code: offlineCode || 'OFFLINE', title: 'Personal Offline Workspace' },
+          isOffline: true
+        };
+      }
+      if (roomParam) {
+        return {
+          room: { code: roomParam.toUpperCase(), title: `Room ${roomParam.toUpperCase()}` },
+          isOffline: false
+        };
+      }
+    } catch (e) {}
+
+    return null;
+  });
+
+  const [currentView, setCurrentView] = useState(() => initialSession ? 'whiteboard' : 'hub');
+  const [activeRoom, setActiveRoom] = useState(() => initialSession?.room || null);
+  const [isOfflineBoard, setIsOfflineBoard] = useState(() => Boolean(initialSession?.isOffline));
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(() => !user && !initialSession);
   const [roomInvite, setRoomInvite] = useState(null);
   const [customServerHost, setCustomServerHost] = useState(() => {
     return localStorage.getItem('whiteboard_custom_server') || '';
@@ -31,12 +63,9 @@ export default function App() {
 
   const wsRef = useRef(null);
 
-  // Auto-route on direct URL query params (?room=CODE or ?offline=true)
+  // Auto-route on direct URL query params or restored session
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    const offlineParam = params.get('offline');
-    if (offlineParam) {
+    if (initialSession) {
       const randCode = 'USR-' + Math.random().toString(36).substring(2, 6).toUpperCase();
       const defaultUser = user || { user_code: randCode, name: 'User', avatar_color: '#3b82f6' };
       if (!user) {
@@ -44,19 +73,15 @@ export default function App() {
         try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
       }
       setIsAccountModalOpen(false);
-      handleOpenBoard({
-        room: { code: 'OFFLINE', title: 'Personal Offline Workspace' },
-        isOffline: true
-      });
-    } else if (roomParam) {
-      const randSuffix = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const defaultUser = user || { user_code: `USR-${randSuffix}`, name: `Collaborator ${randSuffix}`, avatar_color: '#10b981' };
-      if (!user) {
-        setUser(defaultUser);
-        try { localStorage.setItem('whiteboard_user', JSON.stringify(defaultUser)); } catch(e){}
+
+      if (!initialSession.isOffline && initialSession.room?.code) {
+        handleJoinDirect(initialSession.room.code);
+      } else {
+        handleOpenBoard({
+          room: initialSession.room,
+          isOffline: true
+        });
       }
-      setIsAccountModalOpen(false);
-      handleJoinDirect(roomParam);
     }
   }, []);
 
@@ -169,6 +194,23 @@ export default function App() {
     setActiveRoom(room);
     setIsOfflineBoard(isOffline);
     setCurrentView('whiteboard');
+    try {
+      sessionStorage.setItem('active_whiteboard_session', JSON.stringify({ room, isOffline }));
+      const cleanUrl = isOffline
+        ? `${window.location.pathname}?offline=true${room?.code && room.code !== 'OFFLINE' ? `&code=${room.code}` : ''}`
+        : `${window.location.pathname}?room=${room.code}`;
+      window.history.replaceState(null, '', cleanUrl);
+    } catch (e) {}
+  };
+
+  const handleBackToHub = () => {
+    try {
+      sessionStorage.removeItem('active_whiteboard_session');
+      window.history.replaceState(null, '', window.location.pathname);
+    } catch (e) {}
+    setCurrentView('hub');
+    setActiveRoom(null);
+    setIsOfflineBoard(false);
   };
 
   const handleJoinDirect = async (code, customHost = null) => {
@@ -423,7 +465,7 @@ export default function App() {
         <Whiteboard
           room={activeRoom}
           user={user}
-          onBackToHub={() => setCurrentView('hub')}
+          onBackToHub={handleBackToHub}
           ws={isOfflineBoard ? null : activeSocket}
           isOffline={isOfflineBoard}
         />

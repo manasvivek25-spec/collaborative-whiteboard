@@ -429,9 +429,24 @@ export default function Whiteboard({
         setStatusText('Chat history cleared');
         break;
 
-      case 'new_milestone':
-        setMilestones(prev => [msg.milestone, ...prev]);
+      case 'new_milestone': {
+        const ms = msg.milestone;
+        if (!ms) break;
+        if (msg.is_private) {
+          setPrivateMilestones(prev => [ms, ...prev.filter(m => m.id !== ms.id)]);
+          try {
+            const cur = JSON.parse(localStorage.getItem('my_private_instances') || '[]');
+            localStorage.setItem('my_private_instances', JSON.stringify([ms, ...cur.filter(m => m.id !== ms.id)]));
+          } catch(e) {}
+        } else {
+          setMilestones(prev => [ms, ...prev.filter(m => m.id !== ms.id)]);
+          try {
+            const cur = JSON.parse(localStorage.getItem(`offline_milestones_${room?.code || 'local'}`) || '[]');
+            localStorage.setItem(`offline_milestones_${room?.code || 'local'}`, JSON.stringify([ms, ...cur.filter(m => m.id !== ms.id)]));
+          } catch(e) {}
+        }
         break;
+      }
 
       case 'snapshot_restored':
         setViewingInstance(null);
@@ -440,10 +455,27 @@ export default function Whiteboard({
         showNotification(`🔄 Canvas restored to milestone '${msg.title}' by ${msg.restored_by}`);
         break;
 
-      case 'new_public_work':
-        setPublicWorks(prev => [msg.public_work, ...prev]);
-        showNotification(`🖼️ ${msg.public_work.author_name} published a screenshot to Public Works!`);
+      case 'new_public_work': {
+        const pw = msg.public_work || msg.work;
+        if (!pw) break;
+        if (msg.is_private) {
+          setPrivateScreenshots(prev => [pw, ...prev.filter(p => p.id !== pw.id)]);
+          try {
+            const cur = JSON.parse(localStorage.getItem('my_private_screenshots') || '[]');
+            localStorage.setItem('my_private_screenshots', JSON.stringify([pw, ...cur.filter(p => p.id !== pw.id)]));
+          } catch(e) {}
+        } else {
+          setPublicWorks(prev => [pw, ...prev.filter(p => p.id !== pw.id)]);
+          try {
+            const cur = JSON.parse(localStorage.getItem(`offline_public_works_${room?.code || 'local'}`) || '[]');
+            localStorage.setItem(`offline_public_works_${room?.code || 'local'}`, JSON.stringify([pw, ...cur.filter(p => p.id !== pw.id)]));
+          } catch(e) {}
+          if (pw.author_code !== user?.user_code) {
+            showNotification(`🖼️ ${pw.author_name} published a screenshot to Public Works!`);
+          }
+        }
         break;
+      }
 
       case 'public_work_deleted':
         setPublicWorks(prev => prev.filter(p => p.id !== msg.id));
@@ -2165,60 +2197,54 @@ export default function Whiteboard({
     });
   };
 
-  const handleConfirmSaveDestination = ({ destination, title }) => {
+  const handleConfirmSaveDestination = ({ destination, title, forcedMode = null }) => {
     const isPublic = destination === 'public';
+    const mode = forcedMode || saveModalConfig?.mode || 'instance';
 
-    if (saveModalConfig?.mode === 'screenshot') {
+    if (mode === 'screenshot') {
       const dataUrl = captureScreenshotDataUrl();
       if (!dataUrl) return;
 
+      const workId = `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const workObj = {
+        id: workId,
+        title: (title || 'Canvas Snapshot').trim(),
+        image_data: dataUrl,
+        is_public: isPublic,
+        author_code: user?.user_code || 'local',
+        author_name: user?.name || 'Local User',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
       if (isPublic) {
+        // Instant optimistic update in React state
+        setPublicWorks(prev => [workObj, ...prev.filter(p => p.id !== workId)]);
+        try {
+          const cur = JSON.parse(localStorage.getItem(`offline_public_works_${room?.code || 'local'}`) || '[]');
+          localStorage.setItem(`offline_public_works_${room?.code || 'local'}`, JSON.stringify([workObj, ...cur.filter(p => p.id !== workId)]));
+        } catch(e) {}
+
         if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'save_public_work',
-            title,
+            id: workId,
+            title: workObj.title,
             image_data: dataUrl,
             is_public: 1
           }));
-          showNotification(`🌐 Published screenshot "${title}" to Public Works!`);
-        } else {
-          // Offline / Local Public Works
-          const offWork = {
-            id: `pw_off_${Date.now()}`,
-            title,
-            image_data: dataUrl,
-            is_public: true,
-            author_code: user?.user_code || 'local',
-            author_name: user?.name || 'Local User',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          };
-          setPublicWorks(prev => {
-            const next = [offWork, ...prev];
-            try { localStorage.setItem(`offline_public_works_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
-            return next;
-          });
-          showNotification(`🌐 Screenshot "${title}" saved to Public Works!`);
         }
+        showNotification(`🌐 Published screenshot "${workObj.title}" to Public Works!`);
       } else {
-        // Save to My Own System (Private)
-        const privWork = {
-          id: `pw_priv_${Date.now()}`,
-          title,
-          image_data: dataUrl,
-          is_public: false,
-          author_code: user?.user_code || 'local',
-          author_name: user?.name || 'Local User',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setPrivateScreenshots(prev => {
-          const next = [privWork, ...prev];
-          try { localStorage.setItem('my_private_screenshots', JSON.stringify(next)); } catch(e){}
-          return next;
-        });
+        // Save to My Own System (Private Screenshot)
+        setPrivateScreenshots(prev => [workObj, ...prev.filter(p => p.id !== workId)]);
+        try {
+          const cur = JSON.parse(localStorage.getItem('my_private_screenshots') || '[]');
+          localStorage.setItem('my_private_screenshots', JSON.stringify([workObj, ...cur.filter(p => p.id !== workId)]));
+        } catch(e) {}
 
         // Trigger local file download
         const a = document.createElement('a');
-        a.download = `${title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
+        a.download = `${workObj.title.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.png`;
         a.href = dataUrl;
         document.body.appendChild(a);
         a.click();
@@ -2226,58 +2252,78 @@ export default function Whiteboard({
 
         showNotification(`💾 Screenshot saved to your own system files!`);
       }
-    } else if (saveModalConfig?.mode === 'instance') {
-      const unUndoneActions = currentDisplayActions.filter(a => !a.undone);
+
+      // Log user activity
+      try {
+        fetch('/api/user/log-activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_code: user?.user_code || 'GUEST',
+            room_code: room?.code || 'LOCAL',
+            action_type: 'SAVE_SNAPSHOT',
+            details: `Saved ${isPublic ? 'public' : 'private'} snapshot "${workObj.title}"`
+          })
+        }).catch(() => {});
+      } catch(e) {}
+
+    } else if (mode === 'instance') {
+      const unUndoneActions = currentDisplayActions.filter(a => a && !a.undone);
+      const msId = `ms_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const msObj = {
+        id: msId,
+        title: (title || 'Whiteboard Instance').trim(),
+        is_public: isPublic,
+        author_code: user?.user_code || 'local',
+        author_name: user?.name || 'Local User',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        snapshot: unUndoneActions,
+        original_snapshot: unUndoneActions,
+        host_sandbox: unUndoneActions
+      };
 
       if (isPublic) {
+        // Instant optimistic update in React state
+        setMilestones(prev => [msObj, ...prev.filter(m => m.id !== msId)]);
+        try {
+          const cur = JSON.parse(localStorage.getItem(`offline_milestones_${room?.code || 'local'}`) || '[]');
+          localStorage.setItem(`offline_milestones_${room?.code || 'local'}`, JSON.stringify([msObj, ...cur.filter(m => m.id !== msId)]));
+        } catch(e) {}
+
         if (!isOffline && ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'save_milestone',
-            title,
+            id: msId,
+            title: msObj.title,
             snapshot: unUndoneActions,
             is_public: 1
           }));
-          showNotification(`🌐 Published instance "${title}" to room Public Works!`);
-        } else {
-          // Offline / Local Public Instance
-          const offMs = {
-            id: `ms_off_${Date.now()}`,
-            title,
-            is_public: true,
-            author_code: user?.user_code || 'local',
-            author_name: user?.name || 'Local User',
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            snapshot: unUndoneActions,
-            original_snapshot: unUndoneActions,
-            host_sandbox: unUndoneActions
-          };
-          setMilestones(prev => {
-            const next = [offMs, ...prev];
-            try { localStorage.setItem(`offline_milestones_${room?.code || 'local'}`, JSON.stringify(next)); } catch(e){}
-            return next;
-          });
-          showNotification(`📌 Saved instance "${title}" to Public Works!`);
         }
+        showNotification(`🌐 Published instance "${msObj.title}" to room Public Works!`);
       } else {
         // Save to My Own System (Private Instance)
-        const privMs = {
-          id: `ms_priv_${Date.now()}`,
-          title,
-          is_public: false,
-          author_code: user?.user_code || 'local',
-          author_name: user?.name || 'Local User',
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          snapshot: unUndoneActions,
-          original_snapshot: unUndoneActions,
-          host_sandbox: unUndoneActions
-        };
-        setPrivateMilestones(prev => {
-          const next = [privMs, ...prev];
-          try { localStorage.setItem('my_private_instances', JSON.stringify(next)); } catch(e){}
-          return next;
-        });
-        showNotification(`💾 Instance "${title}" saved to your own local system!`);
+        setPrivateMilestones(prev => [msObj, ...prev.filter(m => m.id !== msId)]);
+        try {
+          const cur = JSON.parse(localStorage.getItem('my_private_instances') || '[]');
+          localStorage.setItem('my_private_instances', JSON.stringify([msObj, ...cur.filter(m => m.id !== msId)]));
+        } catch(e) {}
+
+        showNotification(`💾 Instance "${msObj.title}" saved to your own local system!`);
       }
+
+      // Log user activity
+      try {
+        fetch('/api/user/log-activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_code: user?.user_code || 'GUEST',
+            room_code: room?.code || 'LOCAL',
+            action_type: 'SAVE_INSTANCE',
+            details: `Saved ${isPublic ? 'public' : 'private'} milestone instance "${msObj.title}"`
+          })
+        }).catch(() => {});
+      } catch(e) {}
     }
 
     setSaveModalConfig(null);
@@ -2287,7 +2333,8 @@ export default function Whiteboard({
     if (typeof optionsOrTitle === 'object' && optionsOrTitle !== null) {
       handleConfirmSaveDestination({
         destination: optionsOrTitle.destination || 'public',
-        title: optionsOrTitle.title || `Instance - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        title: optionsOrTitle.title || `Instance - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        forcedMode: 'instance'
       });
       return;
     }
@@ -2304,7 +2351,8 @@ export default function Whiteboard({
     if (typeof optionsOrTitle === 'object' && optionsOrTitle !== null) {
       handleConfirmSaveDestination({
         destination: optionsOrTitle.destination || 'public',
-        title: optionsOrTitle.title || `Screenshot - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+        title: optionsOrTitle.title || `Screenshot - ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+        forcedMode: 'screenshot'
       });
       return;
     }

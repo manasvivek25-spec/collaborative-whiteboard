@@ -1029,7 +1029,7 @@ function handleWsMessage(ws, msg) {
 
       const snap = msg.snapshot || db.getRoomActions(meta.room_code);
       const milestone = {
-        id: `ms_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: msg.id || `ms_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         title: msg.title || 'Saved Milestone',
         author_code: meta.user_code,
         author_name: meta.user_name,
@@ -1423,7 +1423,7 @@ function handleWsMessage(ws, msg) {
       }
 
       const work = {
-        id: `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: msg.id || `pw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         title: msg.title || 'Canvas Snapshot',
         author_code: meta.user_code,
         author_name: meta.user_name,
@@ -1437,7 +1437,8 @@ function handleWsMessage(ws, msg) {
       if (isPublic) {
         broadcastToRoom(meta.room_code, {
           type: 'new_public_work',
-          work
+          work,
+          public_work: work
         });
 
         const sysNotice = {
@@ -1456,6 +1457,7 @@ function handleWsMessage(ws, msg) {
         ws.send(JSON.stringify({
           type: 'new_public_work',
           work,
+          public_work: work,
           is_private: true
         }));
       }
